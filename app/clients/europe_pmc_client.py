@@ -34,6 +34,15 @@ async def search_europe_pmc(query: str, limit: int = 5) -> List[MetadataResponse
                 item_url = f"https://europepmc.org/article/PMC/{pmcid}" if pmcid else None
                 abstract = item.get("abstractText")
                 
+                keyword_list = item.get("keywordList")
+                keywords = []
+                if keyword_list and "keyword" in keyword_list:
+                    kws = keyword_list["keyword"]
+                    if isinstance(kws, list):
+                        keywords = kws
+                    elif isinstance(kws, str):
+                        keywords = [kws]
+                
                 results.append(MetadataResponse(
                     title=title,
                     authors=authors,
@@ -41,7 +50,8 @@ async def search_europe_pmc(query: str, limit: int = 5) -> List[MetadataResponse
                     year=year,
                     source="europepmc",
                     url=item_url,
-                    abstract=abstract
+                    abstract=abstract,
+                    keywords=keywords
                 ))
         except Exception as e:
             print(f"Error fetching from Europe PMC: {e}")
@@ -85,6 +95,15 @@ async def get_by_doi_europe_pmc(doi: str) -> Optional[MetadataResponse]:
             item_url = f"https://europepmc.org/article/PMC/{pmcid}" if pmcid else None
             abstract = item.get("abstractText")
             
+            keyword_list = item.get("keywordList")
+            keywords = []
+            if keyword_list and "keyword" in keyword_list:
+                kws = keyword_list["keyword"]
+                if isinstance(kws, list):
+                    keywords = kws
+                elif isinstance(kws, str):
+                    keywords = [kws]
+            
             return MetadataResponse(
                 title=title,
                 authors=authors,
@@ -92,7 +111,8 @@ async def get_by_doi_europe_pmc(doi: str) -> Optional[MetadataResponse]:
                 year=year,
                 source="europepmc",
                 url=item_url,
-                abstract=abstract
+                abstract=abstract,
+                keywords=keywords
             )
         except Exception as e:
             print(f"Error fetching from Europe PMC by DOI: {e}")

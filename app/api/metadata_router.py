@@ -15,20 +15,20 @@ def get_metadata_service() -> MetadataService:
 @router.get("/search", response_model=List[MetadataResponse])
 async def search_metadata(
     query: str = Query(..., description="Término de búsqueda (ej. 'Machine Learning')"),
-    source: Optional[str] = Query(None, description="Fuente específica (crossref, openalex, semanticscholar, europepmc) o vacío para todas"),
+    source: Optional[str] = Query(None, description="Fuente específica (crossref, openalex, semanticscholar, europepmc, unpaywall) o vacío para todas"),
     limit: int = Query(5, description="Límite de resultados por fuente (default 5)"),
     svc: MetadataService = Depends(get_metadata_service)
 ):
     """
     Busca metadatos de literatura científica. Si no se especifica 'source',
-    se hará una petición concurrente a CrossRef, OpenAlex, Semantic Scholar y Europe PMC.
+    se hará una petición concurrente a CrossRef, OpenAlex, Semantic Scholar, Europe PMC y Unpaywall.
     """
     return await svc.search_metadata(query, source, limit)
 
 @router.get("/doi/{doi:path}", response_model=List[MetadataResponse])
 async def search_metadata_by_doi(
     doi: str,
-    source: Optional[str] = Query(None, description="Fuente específica (crossref, openalex, semanticscholar, europepmc) o vacío para todas"),
+    source: Optional[str] = Query(None, description="Fuente específica (crossref, openalex, semanticscholar, europepmc, unpaywall) o vacío para todas"),
     svc: MetadataService = Depends(get_metadata_service)
 ):
     """
