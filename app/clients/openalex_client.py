@@ -45,6 +45,12 @@ async def search_openalex(query: str, limit: int = 5) -> List[MetadataResponse]:
                 item_url = item.get("id")
                 abstract = _reconstruct_openalex_abstract(item.get("abstract_inverted_index"))
                 
+                keywords = []
+                if item.get("keywords"):
+                    keywords = [kw.get("display_name") for kw in item.get("keywords", []) if kw.get("display_name")]
+                elif item.get("concepts"):
+                    keywords = [concept.get("display_name") for concept in item.get("concepts", []) if concept.get("display_name")]
+                
                 results.append(MetadataResponse(
                     title=title,
                     authors=authors,
@@ -52,7 +58,8 @@ async def search_openalex(query: str, limit: int = 5) -> List[MetadataResponse]:
                     year=year,
                     source="openalex",
                     url=item_url,
-                    abstract=abstract
+                    abstract=abstract,
+                    keywords=keywords
                 ))
         except Exception as e:
             print(f"Error fetching from OpenAlex: {e}")
@@ -87,6 +94,12 @@ async def get_by_doi_openalex(doi: str) -> Optional[MetadataResponse]:
             item_url = item.get("id")
             abstract = _reconstruct_openalex_abstract(item.get("abstract_inverted_index"))
             
+            keywords = []
+            if item.get("keywords"):
+                keywords = [kw.get("display_name") for kw in item.get("keywords", []) if kw.get("display_name")]
+            elif item.get("concepts"):
+                keywords = [concept.get("display_name") for concept in item.get("concepts", []) if concept.get("display_name")]
+            
             return MetadataResponse(
                 title=title,
                 authors=authors,
@@ -94,7 +107,8 @@ async def get_by_doi_openalex(doi: str) -> Optional[MetadataResponse]:
                 year=year,
                 source="openalex",
                 url=item_url,
-                abstract=abstract
+                abstract=abstract,
+                keywords=keywords
             )
         except Exception as e:
             print(f"Error fetching from OpenAlex by DOI: {e}")

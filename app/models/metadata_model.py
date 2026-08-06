@@ -9,3 +9,5 @@ class MetadataResponse(BaseModel):
     source: str  # e.g., 'crossref', 'openalex', 'semanticscholar', 'europepmc'
     url: Optional[str] = None
     abstract: Optional[str] = None
+    keywords: Optional[List[str]] = None
+    s2FieldsOfStudy: Optional[list] = None

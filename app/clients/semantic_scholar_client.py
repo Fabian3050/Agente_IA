@@ -7,7 +7,7 @@ async def search_semantic_scholar(query: str, limit: int = 5) -> List[MetadataRe
     params = {
         "query": query, 
         "limit": limit,
-        "fields": "title,authors,year,externalIds,url,abstract"
+        "fields": "title,authors,year,externalIds,url,abstract,s2FieldsOfStudy"
     }
     results = []
     
@@ -29,6 +29,7 @@ async def search_semantic_scholar(query: str, limit: int = 5) -> List[MetadataRe
                 year = item.get("year")
                 item_url = item.get("url")
                 abstract = item.get("abstract")
+                s2FieldsOfStudy = item.get("s2FieldsOfStudy")
                 
                 results.append(MetadataResponse(
                     title=title,
@@ -37,7 +38,8 @@ async def search_semantic_scholar(query: str, limit: int = 5) -> List[MetadataRe
                     year=year,
                     source="semanticscholar",
                     url=item_url,
-                    abstract=abstract
+                    abstract=abstract,
+                    s2FieldsOfStudy=s2FieldsOfStudy
                 ))
         except Exception as e:
             print(f"Error fetching from Semantic Scholar: {e}")
@@ -47,7 +49,7 @@ async def search_semantic_scholar(query: str, limit: int = 5) -> List[MetadataRe
 async def get_by_doi_semantic_scholar(doi: str) -> Optional[MetadataResponse]:
     url = f"https://api.semanticscholar.org/graph/v1/paper/DOI:{doi}"
     params = {
-        "fields": "title,authors,year,externalIds,url,abstract"
+        "fields": "title,authors,year,externalIds,url,abstract,s2FieldsOfStudy"
     }
     
     async with httpx.AsyncClient() as client:
@@ -68,6 +70,7 @@ async def get_by_doi_semantic_scholar(doi: str) -> Optional[MetadataResponse]:
             year = item.get("year")
             item_url = item.get("url")
             abstract = item.get("abstract")
+            s2FieldsOfStudy = item.get("s2FieldsOfStudy")
             
             return MetadataResponse(
                 title=title,
@@ -76,7 +79,8 @@ async def get_by_doi_semantic_scholar(doi: str) -> Optional[MetadataResponse]:
                 year=year,
                 source="semanticscholar",
                 url=item_url,
-                abstract=abstract
+                abstract=abstract,
+                s2FieldsOfStudy=s2FieldsOfStudy
             )
         except Exception as e:
             print(f"Error fetching from Semantic Scholar by DOI: {e}")

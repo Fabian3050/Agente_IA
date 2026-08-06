@@ -5,6 +5,7 @@ from app.clients.crossref_client import search_crossref, get_by_doi_crossref
 from app.clients.openalex_client import search_openalex, get_by_doi_openalex
 from app.clients.semantic_scholar_client import search_semantic_scholar, get_by_doi_semantic_scholar
 from app.clients.europe_pmc_client import search_europe_pmc, get_by_doi_europe_pmc
+from app.clients.unpaywall_client import search_unpaywall, get_by_doi_unpaywall
 
 class MetadataService:
     async def search_metadata(self, query: str, source: Optional[str] = None, limit_per_source: int = 5) -> List[MetadataResponse]:
@@ -24,13 +25,16 @@ class MetadataService:
                 results.extend(await search_semantic_scholar(query, limit_per_source))
             elif source == "europepmc":
                 results.extend(await search_europe_pmc(query, limit_per_source))
+            elif source == "unpaywall":
+                results.extend(await search_unpaywall(query, limit_per_source))
         else:
             # Búsqueda concurrente en todos los clientes
             tasks = [
                 search_crossref(query, limit_per_source),
                 search_openalex(query, limit_per_source),
                 search_semantic_scholar(query, limit_per_source),
-                search_europe_pmc(query, limit_per_source)
+                search_europe_pmc(query, limit_per_source),
+                search_unpaywall(query, limit_per_source)
             ]
             
             completed_tasks = await asyncio.gather(*tasks, return_exceptions=True)
@@ -64,12 +68,16 @@ class MetadataService:
             elif source == "europepmc":
                 res = await get_by_doi_europe_pmc(doi)
                 if res: results.append(res)
+            elif source == "unpaywall":
+                res = await get_by_doi_unpaywall(doi)
+                if res: results.append(res)
         else:
             tasks = [
                 get_by_doi_crossref(doi),
                 get_by_doi_openalex(doi),
                 get_by_doi_semantic_scholar(doi),
-                get_by_doi_europe_pmc(doi)
+                get_by_doi_europe_pmc(doi),
+                get_by_doi_unpaywall(doi)
             ]
             
             completed_tasks = await asyncio.gather(*tasks, return_exceptions=True)
