@@ -43,6 +43,17 @@ async def search_europe_pmc(query: str, limit: int = 5) -> List[MetadataResponse
                     elif isinstance(kws, str):
                         keywords = [kws]
                 
+                grants_list = item.get("grantsList")
+                funding_source = []
+                if grants_list and "grant" in grants_list:
+                    grants = grants_list["grant"]
+                    if isinstance(grants, dict):
+                        grants = [grants]
+                    for grant in grants:
+                        if grant.get("agency"):
+                            funding_source.append(grant.get("agency"))
+                funding_source = list(dict.fromkeys(funding_source)) if funding_source else None
+                
                 results.append(MetadataResponse(
                     title=title,
                     authors=authors,
@@ -51,7 +62,8 @@ async def search_europe_pmc(query: str, limit: int = 5) -> List[MetadataResponse
                     source="europepmc",
                     url=item_url,
                     abstract=abstract,
-                    keywords=keywords
+                    keywords=keywords,
+                    funding_source=funding_source
                 ))
         except Exception as e:
             print(f"Error fetching from Europe PMC: {e}")
@@ -104,6 +116,17 @@ async def get_by_doi_europe_pmc(doi: str) -> Optional[MetadataResponse]:
                 elif isinstance(kws, str):
                     keywords = [kws]
             
+            grants_list = item.get("grantsList")
+            funding_source = []
+            if grants_list and "grant" in grants_list:
+                grants = grants_list["grant"]
+                if isinstance(grants, dict):
+                    grants = [grants]
+                for grant in grants:
+                    if grant.get("agency"):
+                        funding_source.append(grant.get("agency"))
+            funding_source = list(dict.fromkeys(funding_source)) if funding_source else None
+            
             return MetadataResponse(
                 title=title,
                 authors=authors,
@@ -112,7 +135,8 @@ async def get_by_doi_europe_pmc(doi: str) -> Optional[MetadataResponse]:
                 source="europepmc",
                 url=item_url,
                 abstract=abstract,
-                keywords=keywords
+                keywords=keywords,
+                funding_source=funding_source
             )
         except Exception as e:
             print(f"Error fetching from Europe PMC by DOI: {e}")

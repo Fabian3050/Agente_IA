@@ -51,6 +51,24 @@ async def search_openalex(query: str, limit: int = 5) -> List[MetadataResponse]:
                 elif item.get("concepts"):
                     keywords = [concept.get("display_name") for concept in item.get("concepts", []) if concept.get("display_name")]
                 
+                funding_source = []
+                for grant in item.get("grants", []):
+                    if grant.get("funder_display_name"):
+                        funding_source.append(grant.get("funder_display_name"))
+                funding_source = list(dict.fromkeys(funding_source)) if funding_source else None
+                
+                ods = []
+                for sdg in item.get("sustainable_development_goals", []):
+                    if sdg.get("display_name"):
+                        ods.append(sdg.get("display_name"))
+                ods = list(dict.fromkeys(ods)) if ods else None
+                
+                areas_ocde = []
+                for topic in item.get("topics", []):
+                    if topic.get("domain") and topic["domain"].get("display_name"):
+                        areas_ocde.append(topic["domain"].get("display_name"))
+                areas_ocde = list(dict.fromkeys(areas_ocde)) if areas_ocde else None
+                
                 results.append(MetadataResponse(
                     title=title,
                     authors=authors,
@@ -59,7 +77,10 @@ async def search_openalex(query: str, limit: int = 5) -> List[MetadataResponse]:
                     source="openalex",
                     url=item_url,
                     abstract=abstract,
-                    keywords=keywords
+                    keywords=keywords,
+                    funding_source=funding_source,
+                    ods=ods,
+                    areas_ocde=areas_ocde
                 ))
         except Exception as e:
             print(f"Error fetching from OpenAlex: {e}")
@@ -100,6 +121,18 @@ async def get_by_doi_openalex(doi: str) -> Optional[MetadataResponse]:
             elif item.get("concepts"):
                 keywords = [concept.get("display_name") for concept in item.get("concepts", []) if concept.get("display_name")]
             
+            funding_source = []
+            for grant in item.get("grants", []):
+                if grant.get("funder_display_name"):
+                    funding_source.append(grant.get("funder_display_name"))
+            funding_source = list(dict.fromkeys(funding_source)) if funding_source else None
+            
+            ods = []
+            for sdg in item.get("sustainable_development_goals", []):
+                if sdg.get("display_name"):
+                    ods.append(sdg.get("display_name"))
+            ods = list(dict.fromkeys(ods)) if ods else None
+            
             return MetadataResponse(
                 title=title,
                 authors=authors,
@@ -108,7 +141,9 @@ async def get_by_doi_openalex(doi: str) -> Optional[MetadataResponse]:
                 source="openalex",
                 url=item_url,
                 abstract=abstract,
-                keywords=keywords
+                keywords=keywords,
+                funding_source=funding_source,
+                ods=ods,
             )
         except Exception as e:
             print(f"Error fetching from OpenAlex by DOI: {e}")
