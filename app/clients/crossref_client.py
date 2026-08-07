@@ -36,6 +36,12 @@ async def search_crossref(query: str, limit: int = 5) -> List[MetadataResponse]:
                 raw_abstract = item.get("abstract")
                 abstract = re.sub(r'<[^>]+>', '', str(raw_abstract)) if raw_abstract else None
                 
+                funding_source = []
+                for funder in item.get("funder", []):
+                    if funder.get("name"):
+                        funding_source.append(funder.get("name"))
+                funding_source = list(dict.fromkeys(funding_source)) if funding_source else None
+                
                 results.append(MetadataResponse(
                     title=title,
                     authors=authors,
@@ -43,7 +49,8 @@ async def search_crossref(query: str, limit: int = 5) -> List[MetadataResponse]:
                     year=year,
                     source="crossref",
                     url=item_url,
-                    abstract=abstract
+                    abstract=abstract,
+                    funding_source=funding_source
                 ))
         except Exception as e:
             print(f"Error fetching from CrossRef: {e}")
@@ -81,6 +88,12 @@ async def get_by_doi_crossref(doi: str) -> Optional[MetadataResponse]:
             raw_abstract = item.get("abstract")
             abstract = re.sub(r'<[^>]+>', '', str(raw_abstract)) if raw_abstract else None
             
+            funding_source = []
+            for funder in item.get("funder", []):
+                if funder.get("name"):
+                    funding_source.append(funder.get("name"))
+            funding_source = list(dict.fromkeys(funding_source)) if funding_source else None
+            
             return MetadataResponse(
                 title=title,
                 authors=authors,
@@ -88,7 +101,8 @@ async def get_by_doi_crossref(doi: str) -> Optional[MetadataResponse]:
                 year=year,
                 source="crossref",
                 url=item_url,
-                abstract=abstract
+                abstract=abstract,
+                funding_source=funding_source
             )
         except Exception as e:
             print(f"Error fetching from CrossRef by DOI: {e}")

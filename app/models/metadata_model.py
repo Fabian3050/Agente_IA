@@ -11,3 +11,6 @@ class MetadataResponse(BaseModel):
     abstract: Optional[str] = None
     keywords: Optional[List[str]] = None
     s2FieldsOfStudy: Optional[list] = None
+    funding_source: Optional[List[str]] = None
+    ods: Optional[List[str]] = None
+    areas_ocde: Optional[List[str]] = None
