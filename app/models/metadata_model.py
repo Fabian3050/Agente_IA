@@ -13,3 +13,4 @@ class MetadataResponse(BaseModel):
     s2FieldsOfStudy: Optional[list] = None
     funding_source: Optional[List[str]] = None
     ods: Optional[List[str]] = None
+    derechos_acceso: Optional[str] = None
