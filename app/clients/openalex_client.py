@@ -69,6 +69,10 @@ async def search_openalex(query: str, limit: int = 5) -> List[MetadataResponse]:
                         areas_ocde.append(topic["domain"].get("display_name"))
                 areas_ocde = list(dict.fromkeys(areas_ocde)) if areas_ocde else None
                 
+                # Extraer derechos de acceso (Open Access)
+                is_oa = item.get("open_access", {}).get("is_oa")
+                derechos_acceso = "Abierto" if is_oa is True else ("Cerrado" if is_oa is False else "Desconocido")
+                
                 results.append(MetadataResponse(
                     title=title,
                     authors=authors,
@@ -80,7 +84,8 @@ async def search_openalex(query: str, limit: int = 5) -> List[MetadataResponse]:
                     keywords=keywords,
                     funding_source=funding_source,
                     ods=ods,
-                    areas_ocde=areas_ocde
+                    areas_ocde=areas_ocde,
+                    derechos_acceso=derechos_acceso
                 ))
         except Exception as e:
             print(f"Error fetching from OpenAlex: {e}")
@@ -133,6 +138,10 @@ async def get_by_doi_openalex(doi: str) -> Optional[MetadataResponse]:
                     ods.append(sdg.get("display_name"))
             ods = list(dict.fromkeys(ods)) if ods else None
             
+            # Extraer derechos de acceso (Open Access)
+            is_oa = item.get("open_access", {}).get("is_oa")
+            derechos_acceso = "Abierto" if is_oa is True else ("Cerrado" if is_oa is False else "Desconocido")
+            
             return MetadataResponse(
                 title=title,
                 authors=authors,
@@ -144,6 +153,7 @@ async def get_by_doi_openalex(doi: str) -> Optional[MetadataResponse]:
                 keywords=keywords,
                 funding_source=funding_source,
                 ods=ods,
+                derechos_acceso=derechos_acceso,
             )
         except Exception as e:
             print(f"Error fetching from OpenAlex by DOI: {e}")

@@ -12,6 +12,8 @@ from app.models.classification_model import (
     ODSClassificationItem
 )
 
+from app.models.metadata_model import MetadataResponse
+
 class ClassificationService:
     def __init__(self):
         self.metadata_service = MetadataService()
@@ -23,7 +25,9 @@ class ClassificationService:
             raise Exception(f"No se encontraron metadatos para el DOI: {doi}")
             
         articulo = results[0] # Tomamos el primer resultado devuelto
-        
+        return await self.classify_metadata_ocde(articulo)
+
+    async def classify_metadata_ocde(self, articulo: MetadataResponse) -> OCDEClassificationResponse:
         # 2. Cargar listado de áreas OCDE
         areas_texto = get_ocde_areas_formatted()
         
@@ -104,6 +108,9 @@ Responde estrictamente en formato JSON válido con la siguiente estructura (como
             raise Exception(f"No se encontraron metadatos para el DOI: {doi}")
             
         articulo = results[0] # Tomamos el primer resultado devuelto
+        return await self.classify_metadata_ods(articulo)
+
+    async def classify_metadata_ods(self, articulo: MetadataResponse) -> ODSClassificationResponse:
         keywords_text = ", ".join(articulo.keywords) if articulo.keywords else "No disponibles"
         
         # 2. Cargar listado de áreas ODS
