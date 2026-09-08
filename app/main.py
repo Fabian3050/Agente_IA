@@ -5,6 +5,7 @@ from app.api.item_router import router as item_router
 from app.api.metadata_router import router as metadata_router
 from app.api.ollama_router import router as ollama_router
 from app.api.classification_router import router as classification_router
+from app.api.dspace_router import router as dspace_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -28,6 +29,7 @@ app.include_router(item_router)
 app.include_router(metadata_router)
 app.include_router(ollama_router)
 app.include_router(classification_router)
+app.include_router(dspace_router)
 
 @app.get("/")
 def read_root():
