@@ -70,11 +70,77 @@ class DSpaceService:
         
     async def get_metadata(self, identifier: str):
         """
-        Si necesitas obtener los metadatos de un ID en específico en el futuro.
+        Obtiene los metadatos de un ID en específico (UUID).
+        Busca a través de todas las páginas de resultados en paralelo
+        para encontrar el registro, dado que el filtrado de la API 
+        no lo encuentra directamente en esta instancia.
         """
         await self._ensure_authenticated()
-        # Aquí podrías llamar a un método del cliente como client.get_item(self.token, identifier)
-        return await self.client.get_item(self.token, identifier)
+        
+        size = 100
+        params = {
+            "page": 0,
+            "size": size,
+            "dsoType": "item"
+        }
+        
+        # Función auxiliar para buscar el UUID dentro de los raw items de una página
+        def encontrar_raw_item(raw_items_list):
+            for raw_item in raw_items_list:
+                indexable_object = raw_item.get("_embedded", {}).get("indexableObject", {})
+                item_id = indexable_object.get("id")
+                item_uuid = indexable_object.get("uuid")
+                if identifier in (item_id, item_uuid):
+                    return raw_item
+            return None
+            
+        # 1. Buscar en la primera página y obtener el total de páginas
+        data = await self.client.get_items(self.token, query_params=params)
+        search_result = data.get("_embedded", {}).get("searchResult", {})
+        raw_items = search_result.get("_embedded", {}).get("objects", [])
+        
+        encontrado_raw = encontrar_raw_item(raw_items)
+        if encontrado_raw:
+            item_data = self._parse_item(encontrado_raw)
+            item_data["all_metadata"] = encontrado_raw.get("_embedded", {}).get("indexableObject", {}).get("metadata", {})
+            return item_data
+            
+        page_info = search_result.get("page", {})
+        total_pages = page_info.get("totalPages", 1)
+        
+        # 2. Si hay más páginas, buscamos en paralelo
+        if total_pages > 1:
+            max_concurrent = 10 # Buscamos rápido de a 10 páginas
+            semaphore = asyncio.Semaphore(max_concurrent)
+            
+            async def buscar_en_pagina(page_num):
+                async with semaphore:
+                    try:
+                        p = {"page": page_num, "size": size, "dsoType": "item"}
+                        d = await self.client.get_items(self.token, query_params=p)
+                        sr = d.get("_embedded", {}).get("searchResult", {})
+                        r_items = sr.get("_embedded", {}).get("objects", [])
+                        return encontrar_raw_item(r_items)
+                    except Exception as e:
+                        print(f"Error procesando página {page_num} buscando UUID: {e}")
+                        return None
+
+            # Lanzamos tareas para las páginas restantes
+            tareas = [asyncio.create_task(buscar_en_pagina(p)) for p in range(1, total_pages)]
+            
+            # as_completed nos permite reaccionar apenas una tarea termine
+            for tarea in asyncio.as_completed(tareas):
+                resultado_tarea = await tarea
+                if resultado_tarea:
+                    # Encontramos el ítem, cancelamos el resto de las tareas para no saturar
+                    for t in tareas:
+                        if not t.done():
+                            t.cancel()
+                    item_data = self._parse_item(resultado_tarea)
+                    item_data["all_metadata"] = resultado_tarea.get("_embedded", {}).get("indexableObject", {}).get("metadata", {})
+                    return item_data
+                    
+        return {"error": f"No se encontró ningún registro con el UUID {identifier} en todo el repositorio."}
 
     async def count_missing_metadata_optimized(self, size: int = 100, max_concurrent: int = 5):
         """
@@ -104,10 +170,10 @@ class DSpaceService:
             uuids_doi_pag = []
             
             for item in items:
-                if item.get("abstract") == "No disponible":
+                if item.get("abstract") == "" or item.get("abstract") == "Sin resumen" or item.get("abstract") == "[No abstract available]":
                     missing_abs_pag += 1
                     uuids_abs_pag.append(item.get("uuid"))
-                if item.get("doi") == "No disponible":
+                if item.get("doi") == "No disponible" or item.get("doi") == "":
                     missing_doi_pag += 1
                     uuids_doi_pag.append(item.get("uuid"))
                     

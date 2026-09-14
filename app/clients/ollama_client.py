@@ -13,7 +13,8 @@ async def generate_text(request: OllamaGenerateRequest) -> OllamaGenerateRespons
     
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.post(url, json=payload, timeout=120.0)
+            # Aumentamos el timeout a 600 segundos (10 minutos) para dar tiempo a descargar o cargar modelos nuevos
+            response = await client.post(url, json=payload, timeout=600.0)
             response.raise_for_status()
             data = response.json()
             
