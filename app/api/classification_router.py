@@ -15,7 +15,7 @@ async def classify_by_doi(
     svc: ClassificationService = Depends(get_classification_service)
 ):
     """
-    Busca metadatos de un artículo por su DOI y utiliza Llama 3.2 para clasificarlo según el estándar OCDE.
+    Busca metadatos de un artículo por su DOI y utiliza ollama con un llm para clasificarlo según el estándar OCDE.
     """
     try:
         return await svc.classify_article_by_doi(doi, source)
@@ -29,7 +29,7 @@ async def classify_by_ods(
     svc: ClassificationService = Depends(get_classification_service)
 ):
     """
-    Busca metadatos de un artículo por su DOI y utiliza Llama 3.2 para clasificarlo según los ODS (Objetivos de Desarrollo Sostenible).
+    Busca metadatos de un artículo por su DOI y utiliza ollama con un llm para clasificarlo según los ODS (Objetivos de Desarrollo Sostenible).
     """
     try:
         return await svc.classify_article_by_ods(doi, source)

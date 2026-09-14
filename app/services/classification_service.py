@@ -31,7 +31,7 @@ class ClassificationService:
         # 2. Cargar listado de áreas OCDE
         areas_texto = get_ocde_areas_formatted()
         
-        # 3. Diseñar el Prompt para Llama 3.2
+        # 3. Diseñar el Prompt para el llm
         prompt = f"""
 Eres un experto en clasificación bibliométrica según el estándar OCDE (FORD/FOS).
 
@@ -56,7 +56,7 @@ Responde estrictamente en formato JSON válido con la siguiente estructura (como
 
         # 4. Consultar a Ollama
         ollama_req = OllamaGenerateRequest(
-            model="llama3.2",
+            model="gemma4:e2b",
             prompt=prompt
         )
         
@@ -116,7 +116,7 @@ Responde estrictamente en formato JSON válido con la siguiente estructura (como
         # 2. Cargar listado de áreas ODS
         areas_texto = get_ods_areas_formatted()
         
-        # 3. Diseñar el Prompt para Llama 3.2
+        # 3. Diseñar el Prompt para el llm 
         prompt = f"""
                     Eres un experto en Objetivos de Desarrollo Sostenible (ODS) de las Naciones Unidas.                    
                     Dado el siguiente artículo científico:                   
