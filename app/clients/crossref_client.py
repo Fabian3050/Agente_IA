@@ -108,3 +108,28 @@ async def get_by_doi_crossref(doi: str) -> Optional[MetadataResponse]:
             print(f"Error fetching from CrossRef by DOI: {e}")
             
     return None
+
+async def get_doi_by_title_and_abstract_crossref(title: Optional[str] = None, abstract: Optional[str] = None) -> Optional[str]:
+    if not title and not abstract:
+        return None
+    
+    parts = []
+    if title:
+        parts.append(title)
+    if abstract:
+        parts.append(abstract)
+        
+    query = " ".join(parts)
+    url = "https://api.crossref.org/works"
+    params = {"query": query, "rows": 1}
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, params=params, timeout=10.0)
+            response.raise_for_status()
+            data = response.json()
+            items = data.get("message", {}).get("items", [])
+            if items:
+                return items[0].get("DOI")
+        except Exception as e:
+            print(f"Error fetching DOI from CrossRef by title and abstract: {e}")
+    return None
