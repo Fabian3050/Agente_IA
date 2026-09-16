@@ -86,3 +86,33 @@ async def get_by_doi_semantic_scholar(doi: str) -> Optional[MetadataResponse]:
             print(f"Error fetching from Semantic Scholar by DOI: {e}")
             
     return None
+
+async def get_doi_by_title_and_abstract_semantic_scholar(title: Optional[str] = None, abstract: Optional[str] = None) -> Optional[str]:
+    if not title and not abstract:
+        return None
+    
+    parts = []
+    if title:
+        parts.append(title)
+    if abstract:
+        parts.append(abstract)
+        
+    query = (" ".join(parts))[:300]
+    url = "https://api.semanticscholar.org/graph/v1/paper/search"
+    params = {
+        "query": query, 
+        "limit": 1,
+        "fields": "externalIds"
+    }
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, params=params, timeout=10.0)
+            response.raise_for_status()
+            data = response.json()
+            items = data.get("data", [])
+            if items:
+                external_ids = items[0].get("externalIds", {})
+                return external_ids.get("DOI")
+        except Exception as e:
+            print(f"Error fetching DOI from Semantic Scholar by title and abstract: {e}")
+    return None
