@@ -65,7 +65,6 @@ class DSpaceService:
             "title": get_metadata_value("dc.title", "Sin título"),
             "abstract": get_metadata_value("dc.description.abstract", "No disponible"),
             "doi": get_metadata_value("dc.identifier.doi", "No disponible"),
-            "type": get_metadata_value("dc.type", "No disponible"),
             "uri": get_metadata_value("dc.identifier.uri") # Link público usualmente
         }
         
@@ -158,42 +157,32 @@ class DSpaceService:
         print(f"Total de páginas a procesar: {total_pages} (a {size} ítems por página)")
 
         total_revisados = 0
-        total_missing_title= 0
         total_missing_abs = 0
-        total_no_abstract = 0
         total_missing_doi = 0
         uuids_sin_abstract = []
         uuids_sin_doi = []
 
         def procesar_items(items):
             revisados_pag = len(items)
-            missing_title_pag = 0
             missing_abs_pag = 0
-            no_abstract_pag = 0
             missing_doi_pag = 0
             uuids_abs_pag = []
             uuids_doi_pag = []
             
             for item in items:
-                if item.get("abstract") == "No disponible" or item.get("abstract") == "" or item.get("abstract") == "Sin resumen":
+                if item.get("abstract") == "" or item.get("abstract") == "Sin resumen" or item.get("abstract") == "[No abstract available]":
                     missing_abs_pag += 1
                     uuids_abs_pag.append(item.get("uuid"))
-                if item.get("abstract") == "[No abstract available]":
-                    no_abstract_pag += 1
                 if item.get("doi") == "No disponible" or item.get("doi") == "":
                     missing_doi_pag += 1
                     uuids_doi_pag.append(item.get("uuid"))
-                if item.get("title") == "No disponible" or item.get("title") == "":
-                    missing_title_pag += 1
                     
-            return revisados_pag, missing_title_pag, no_abstract_pag, missing_abs_pag, missing_doi_pag, uuids_abs_pag, uuids_doi_pag
+            return revisados_pag, missing_abs_pag, missing_doi_pag, uuids_abs_pag, uuids_doi_pag
 
         # Procesamos la página 0
-        rev, miss_title, no_abstract_pag, miss_abs, miss_doi, uuids_abs, uuids_doi = procesar_items(resultado_inicial.get("items", []))
+        rev, miss_abs, miss_doi, uuids_abs, uuids_doi = procesar_items(resultado_inicial.get("items", []))
         total_revisados += rev
-        total_missing_title+= miss_title
         total_missing_abs += miss_abs
-        total_no_abstract += no_abstract_pag
         total_missing_doi += miss_doi
         uuids_sin_abstract.extend(uuids_abs)
         uuids_sin_doi.extend(uuids_doi)
@@ -209,7 +198,7 @@ class DSpaceService:
                         return procesar_items(resultado.get("items", []))
                     except Exception as e:
                         print(f"Error procesando página {page_num}: {e}")
-                        return 0, 0, 0, 0, 0, [], []
+                        return 0, 0, 0, [], []
 
             # Tareas para el resto de las páginas
             tareas = [fetch_and_process_page(p) for p in range(1, total_pages)]
@@ -217,10 +206,8 @@ class DSpaceService:
             resultados_paginas = await asyncio.gather(*tareas)
 
             # Sumamos resultados
-            for rev, miss_title, no_abstract_pag, miss_abs, miss_doi, uuids_abs, uuids_doi in resultados_paginas:
+            for rev, miss_abs, miss_doi, uuids_abs, uuids_doi in resultados_paginas:
                 total_revisados += rev
-                total_missing_title+= miss_title
-                total_no_abstract += no_abstract_pag
                 total_missing_abs += miss_abs
                 total_missing_doi += miss_doi
                 uuids_sin_abstract.extend(uuids_abs)
@@ -228,10 +215,8 @@ class DSpaceService:
 
         return {
             "total_revisados": total_revisados,
-            "total_sin_title": total_missing_title,
             "total_sin_abstract": total_missing_abs,
-            "total_no_abstract_disponible": total_no_abstract,
             "total_sin_doi": total_missing_doi,
             "uuids_sin_abstract": uuids_sin_abstract,
-            #"uuids_sin_doi": uuids_sin_doi
+            "uuids_sin_doi": uuids_sin_doi
         }

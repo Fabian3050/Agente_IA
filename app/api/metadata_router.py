@@ -36,16 +36,3 @@ async def search_metadata_by_doi(
     se hará una petición concurrente a todas las fuentes disponibles.
     """
     return await svc.get_metadata_by_doi(doi, source)
-
-@router.get("/search_doi", response_model=Optional[str])
-async def search_doi(
-    title: Optional[str] = Query(None, description="Título del artículo"),
-    abstract: Optional[str] = Query(None, description="Abstract del artículo"),
-    source: Optional[str] = Query(None, description="Fuente específica (crossref, openalex, semanticscholar, europepmc, unpaywall) o vacío para todas"),
-    svc: MetadataService = Depends(get_metadata_service)
-):
-    """
-    Busca el DOI de un artículo a partir de su título y abstract.
-    Retorna el primer DOI encontrado.
-    """
-    return await svc.get_doi_by_title_and_abstract(title, abstract, source)

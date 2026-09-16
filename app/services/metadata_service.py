@@ -1,10 +1,10 @@
 import asyncio
 from typing import List, Optional
 from app.models.metadata_model import MetadataResponse
-from app.clients.crossref_client import search_crossref, get_by_doi_crossref, get_doi_by_title_and_abstract_crossref
-from app.clients.openalex_client import search_openalex, get_by_doi_openalex, get_doi_by_title_and_abstract_openalex
-from app.clients.semantic_scholar_client import search_semantic_scholar, get_by_doi_semantic_scholar, get_doi_by_title_and_abstract_semantic_scholar
-from app.clients.europe_pmc_client import search_europe_pmc, get_by_doi_europe_pmc, get_doi_by_title_and_abstract_europe_pmc
+from app.clients.crossref_client import search_crossref, get_by_doi_crossref
+from app.clients.openalex_client import search_openalex, get_by_doi_openalex
+from app.clients.semantic_scholar_client import search_semantic_scholar, get_by_doi_semantic_scholar
+from app.clients.europe_pmc_client import search_europe_pmc, get_by_doi_europe_pmc
 from app.clients.unpaywall_client import search_unpaywall, get_by_doi_unpaywall
 
 class MetadataService:
@@ -89,44 +89,3 @@ class MetadataService:
                     print(f"Error en tarea concurrente por DOI: {task_result}")
                     
         return results
-
-    async def get_doi_by_title_and_abstract(self, title: Optional[str] = None, abstract: Optional[str] = None, source: Optional[str] = None) -> Optional[str]:
-        """
-        Busca y retorna el DOI de un artículo dado su título y abstract.
-        Retorna el primer DOI encontrado.
-        """
-        if not title and not abstract:
-            return None
-            
-        if source:
-            source = source.lower()
-            if source == "crossref":
-                return await get_doi_by_title_and_abstract_crossref(title, abstract)
-            elif source == "openalex":
-                return await get_doi_by_title_and_abstract_openalex(title, abstract)
-            elif source == "semanticscholar":
-                return await get_doi_by_title_and_abstract_semantic_scholar(title, abstract)
-            elif source == "europepmc":
-                return await get_doi_by_title_and_abstract_europe_pmc(title, abstract)
-            return None
-            
-        tasks = [
-            asyncio.create_task(get_doi_by_title_and_abstract_crossref(title, abstract)),
-            asyncio.create_task(get_doi_by_title_and_abstract_openalex(title, abstract)),
-            asyncio.create_task(get_doi_by_title_and_abstract_semantic_scholar(title, abstract)),
-            asyncio.create_task(get_doi_by_title_and_abstract_europe_pmc(title, abstract))
-        ]
-        
-        for coro in asyncio.as_completed(tasks):
-            try:
-                doi = await coro
-                if doi:
-                    # Cancel remaining tasks if we found a DOI
-                    for task in tasks:
-                        if not task.done():
-                            task.cancel()
-                    return doi
-            except Exception as e:
-                print(f"Error in concurrent DOI search: {e}")
-                
-        return None
