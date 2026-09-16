@@ -159,31 +159,3 @@ async def get_by_doi_openalex(doi: str) -> Optional[MetadataResponse]:
             print(f"Error fetching from OpenAlex by DOI: {e}")
             
     return None
-
-async def get_doi_by_title_and_abstract_openalex(title: Optional[str] = None, abstract: Optional[str] = None) -> Optional[str]:
-    if not title and not abstract:
-        return None
-    
-    parts = []
-    if title:
-        parts.append(title)
-    if abstract:
-        parts.append(abstract)
-        
-    query = " ".join(parts)
-    url = "https://api.openalex.org/works"
-    params = {"search": query, "per-page": 1}
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(url, params=params, timeout=10.0)
-            response.raise_for_status()
-            data = response.json()
-            items = data.get("results", [])
-            if items:
-                doi = items[0].get("doi")
-                if doi and doi.startswith("https://doi.org/"):
-                    return doi.replace("https://doi.org/", "")
-                return doi
-        except Exception as e:
-            print(f"Error fetching DOI from OpenAlex by title and abstract: {e}")
-    return None

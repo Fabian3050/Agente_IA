@@ -142,33 +142,3 @@ async def get_by_doi_europe_pmc(doi: str) -> Optional[MetadataResponse]:
             print(f"Error fetching from Europe PMC by DOI: {e}")
             
     return None
-
-async def get_doi_by_title_and_abstract_europe_pmc(title: Optional[str] = None, abstract: Optional[str] = None) -> Optional[str]:
-    if not title and not abstract:
-        return None
-    
-    parts = []
-    if title:
-        parts.append(f'TITLE:"{title}"')
-    if abstract:
-        parts.append(f'ABSTRACT:"{abstract[:100]}"')
-        
-    query = " OR ".join(parts)
-    url = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
-    params = {
-        "query": query,
-        "format": "json",
-        "resultType": "core",
-        "pageSize": 1
-    }
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(url, params=params, timeout=10.0)
-            response.raise_for_status()
-            data = response.json()
-            items = data.get("resultList", {}).get("result", [])
-            if items:
-                return items[0].get("doi")
-        except Exception as e:
-            print(f"Error fetching DOI from Europe PMC by title and abstract: {e}")
-    return None
