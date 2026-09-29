@@ -102,7 +102,7 @@ async def procesar_lote():
                     print("[*] Clasificando OCDE mediante LLM...")
                     ocde_res = await classification_service.classify_metadata_ocde(metadata_clasificacion)
                     if ocde_res.clasificaciones:
-                        area_oce_str = ", ".join([f"{c.codigo_ocde} ({c.area_ocde})" for c in ocde_res.clasificaciones])
+                        area_oce_str = ", ".join([f"{c.codigo_disciplina} ({c.nombre_disciplina})" for c in ocde_res.clasificaciones])
                 except Exception as e:
                     print(f"[!] Error clasificando OCDE: {e}")
                     area_oce_str = "Error en clasificación"

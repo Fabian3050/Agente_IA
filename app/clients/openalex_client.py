@@ -123,8 +123,8 @@ async def get_by_doi_openalex(doi: str) -> Optional[MetadataResponse]:
             keywords = []
             if item.get("keywords"):
                 keywords = [kw.get("display_name") for kw in item.get("keywords", []) if kw.get("display_name")]
-            elif item.get("concepts"):
-                keywords = [concept.get("display_name") for concept in item.get("concepts", []) if concept.get("display_name")]
+            #elif item.get("concepts"):
+            #   keywords = [concept.get("display_name") for concept in item.get("concepts", []) if concept.get("display_name")]
             
             funding_source = []
             for grant in item.get("grants", []):
@@ -164,15 +164,19 @@ async def get_doi_by_title_and_abstract_openalex(title: Optional[str] = None, ab
     if not title and not abstract:
         return None
     
-    parts = []
-    if title:
-        parts.append(title)
-    if abstract:
-        parts.append(abstract)
-        
-    query = " ".join(parts)
     url = "https://api.openalex.org/works"
-    params = {"search": query, "per-page": 1}
+    params = {"per-page": 1}
+    
+    if abstract:
+        parts = []
+        if title:
+            parts.append(title)
+        parts.append(abstract)
+        query = " ".join(parts)
+        # La API de OpenAlex limita search.semantic a 2000 caracteres
+        params["search.semantic"] = query[:2000]
+    elif title:
+        params["search"] = title
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(url, params=params, timeout=10.0)

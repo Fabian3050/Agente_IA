@@ -42,6 +42,8 @@ async def search_crossref(query: str, limit: int = 5) -> List[MetadataResponse]:
                         funding_source.append(funder.get("name"))
                 funding_source = list(dict.fromkeys(funding_source)) if funding_source else None
                 
+                keywords = item.get("subject", []) if item.get("subject") else None
+                
                 results.append(MetadataResponse(
                     title=title,
                     authors=authors,
@@ -50,7 +52,8 @@ async def search_crossref(query: str, limit: int = 5) -> List[MetadataResponse]:
                     source="crossref",
                     url=item_url,
                     abstract=abstract,
-                    funding_source=funding_source
+                    funding_source=funding_source,
+                    keywords=keywords
                 ))
         except Exception as e:
             print(f"Error fetching from CrossRef: {e}")
@@ -94,6 +97,8 @@ async def get_by_doi_crossref(doi: str) -> Optional[MetadataResponse]:
                     funding_source.append(funder.get("name"))
             funding_source = list(dict.fromkeys(funding_source)) if funding_source else None
             
+            keywords = item.get("subject", []) if item.get("subject") else None
+            
             return MetadataResponse(
                 title=title,
                 authors=authors,
@@ -102,7 +107,8 @@ async def get_by_doi_crossref(doi: str) -> Optional[MetadataResponse]:
                 source="crossref",
                 url=item_url,
                 abstract=abstract,
-                funding_source=funding_source
+                funding_source=funding_source,
+                keywords=keywords
             )
         except Exception as e:
             print(f"Error fetching from CrossRef by DOI: {e}")

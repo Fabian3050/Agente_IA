@@ -33,22 +33,30 @@ class ClassificationService:
         
         # 3. Diseñar el Prompt para el llm
         prompt = f"""
-Eres un experto en clasificación bibliométrica según el estándar OCDE (FORD/FOS).
+You are an expert academic librarian. Your task is to analyze a scientific article and select ONLY 1 or 2 OECD disciplines that best describe it.
 
-Dado el siguiente artículo científico:
-- Título: {articulo.title}
-- Abstract: {articulo.abstract or 'No disponible'}
+ARTICLE DATA:
+- Title: {articulo.title}
+- Abstract: {articulo.abstract or 'Not available'}
 
-Clasifícalo en UNA O MÁS (si aplican varias) de las siguientes Áreas OCDE disponibles:
+LIST OF ALLOWED DISCIPLINES:
 {areas_texto}
 
-Responde estrictamente en formato JSON válido con la siguiente estructura (como una lista bajo la clave "clasificaciones"):
+STRICT RULES:
+1. SELECT A MAXIMUM OF 2 disciplines from the list above that best fit the article.
+2. DO NOT convert the whole list to JSON. ONLY return the 1 or 2 winning disciplines.
+3. Your output MUST be exclusively a valid JSON with the following exact keys (keys must remain in Spanish for parsing, but you can write the justification in Spanish or English):
+
 {{
   "clasificaciones": [
     {{
-      "codigo_ocde": "código elegido (ej. 6.1.B)",
-      "area_ocde": "nombre exacto de la categoría elegida",
-      "justificacion": "breve explicación en español de 2 oraciones del por qué corresponde a esa área"
+      "codigo_area": "ID",
+      "nombre_area": "Name",
+      "codigo_subarea": "ID",
+      "nombre_subarea": "Name",
+      "codigo_disciplina": "ID",
+      "nombre_disciplina": "Name",
+      "justificacion": "Why you chose this discipline for the article"
     }}
   ]
 }}
@@ -56,7 +64,7 @@ Responde estrictamente en formato JSON válido con la siguiente estructura (como
 
         # 4. Consultar a Ollama
         ollama_req = OllamaGenerateRequest(
-            model="gemma4:e2b",
+            model="llama3.2",
             prompt=prompt
         )
         
@@ -64,12 +72,13 @@ Responde estrictamente en formato JSON válido con la siguiente estructura (como
         
         # 5. Parsear la respuesta de Llama
         try:
-            # Limpiamos bloques markdown ```json si el modelo los incluye
             raw_text = ollama_res.response.strip()
-            if "```json" in raw_text:
-                raw_text = raw_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in raw_text:
-                raw_text = raw_text.split("```")[1].split("```")[0].strip()
+            import re
+            
+            # Buscamos el primer bloque que parezca JSON ignorando texto previo/posterior
+            json_match = re.search(r'(\{.*\})', raw_text, re.DOTALL)
+            if json_match:
+                raw_text = json_match.group(1)
                 
             parsed = json.loads(raw_text)
             
@@ -78,8 +87,12 @@ Responde estrictamente en formato JSON válido con la siguiente estructura (como
             for item in clasificaciones_data:
                 clasificaciones.append(
                     OCDEClassificationItem(
-                        codigo_ocde=item.get("codigo_ocde", "Desconocido"),
-                        area_ocde=item.get("area_ocde", "Desconocido"),
+                        codigo_area=item.get("codigo_area", "Desconocido"),
+                        nombre_area=item.get("nombre_area", "Desconocido"),
+                        codigo_subarea=item.get("codigo_subarea", "Desconocido"),
+                        nombre_subarea=item.get("nombre_subarea", "Desconocido"),
+                        codigo_disciplina=item.get("codigo_disciplina", "Desconocido"),
+                        nombre_disciplina=item.get("nombre_disciplina", "Desconocido"),
                         justificacion=item.get("justificacion", "")
                     )
                 )
@@ -93,8 +106,12 @@ Responde estrictamente en formato JSON válido con la siguiente estructura (como
             return OCDEClassificationResponse(
                 clasificaciones=[
                     OCDEClassificationItem(
-                        codigo_ocde="Indeterminado",
-                        area_ocde="Indeterminado",
+                        codigo_area="Indeterminado",
+                        nombre_area="Indeterminado",
+                        codigo_subarea="Indeterminado",
+                        nombre_subarea="Indeterminado",
+                        codigo_disciplina="Indeterminado",
+                        nombre_disciplina="Indeterminado",
                         justificacion="Respuesta generada sin formato estricto JSON: " + str(ollama_res.response)
                     )
                 ],

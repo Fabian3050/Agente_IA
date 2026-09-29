@@ -6,6 +6,7 @@ class OllamaGenerateRequest(BaseModel):
     prompt: str = Field(..., description="The prompt to generate a response for")
     system: Optional[str] = Field(None, description="System message to (overrides what is defined in the Modelfile)")
     stream: bool = Field(False, description="If false the response will be returned as a single response object")
+    format: Optional[str] = Field(None, description="The format to return a response in. Currently the only accepted value is json")
 
 class OllamaGenerateResponse(BaseModel):
     model: str

@@ -3,8 +3,12 @@ from typing import Optional, List
 from app.models.metadata_model import MetadataResponse
 
 class OCDEClassificationItem(BaseModel):
-    codigo_ocde: str
-    area_ocde: str
+    codigo_area: str
+    nombre_area: str
+    codigo_subarea: str
+    nombre_subarea: str
+    codigo_disciplina: str
+    nombre_disciplina: str
     justificacion: str
 
 class OCDEClassificationResponse(BaseModel):
