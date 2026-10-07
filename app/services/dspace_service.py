@@ -199,6 +199,10 @@ class DSpaceService:
         total_uuids_pub_sin_doi_sin_abs = []
         total_distinct_oaire_types = set()
         total_pub_sin_doi_sin_abs = 0
+        total_sin_abstract_con_doi = 0
+        total_uuids_sin_abstract_con_doi = []
+        total_sin_doi_ni_abstract = 0
+        total_uuids_sin_doi_ni_abstract = []
 
         def procesar_items(items):
             revisados_pag = len(items)
@@ -213,6 +217,10 @@ class DSpaceService:
             uuids_missing_abs_org_art = []
             uuids_pub_sin_doi_sin_abs = []
             distinct_oaire_pag = set()
+            sin_abstract_con_doi_pag = 0
+            uuids_sin_abstract_con_doi_pag = []
+            sin_doi_ni_abstract_pag = 0
+            uuids_sin_doi_ni_abstract_pag = []
             #uuids_abs_pag = []
             #uuids_doi_pag = []
             #uuids_distinct_journal_article_pag = []
@@ -259,13 +267,26 @@ class DSpaceService:
                 if oaire_val and oaire_val not in valid_resource_types and (item.get("doi") == "No disponible" or item.get("doi") == "") and (item.get("abstract") == "No disponible" or item.get("abstract") == "" or item.get("abstract") == "Sin resumen"):
                     pub_sin_doi_sin_abs += 1
                     uuids_pub_sin_doi_sin_abs.append(item.get("uuid"))
+                
+                abs_val = item.get("abstract")
+                is_missing_abstract = abs_val in ["No disponible", "", "Sin resumen", "[No abstract available]"]
+                doi_val = item.get("doi")
+                has_doi = doi_val not in ["No disponible", "", None]
+                if is_missing_abstract and has_doi and oaire_val in oaire_val:
+                    sin_abstract_con_doi_pag += 1
+                    uuids_sin_abstract_con_doi_pag.append(item.get("uuid"))
+                    
+                is_missing_doi = doi_val in ["No disponible", "", None]
+                if is_missing_abstract and is_missing_doi:
+                    sin_doi_ni_abstract_pag += 1
+                    uuids_sin_doi_ni_abstract_pag.append(item.get("uuid"))
                 #else:
                  #   uuids_distinct_journal_article_pag.append(item.get("uuid"))
                     
-            return revisados_pag, missing_title_pag, no_abstract_pag, missing_abs_pag, missing_abs_org_art, missing_doi_pag, missing_subjects_pag, type_journal_Article_pag, uuids_missing_abs_org_art, distinct_oaire_pag, pub_sin_doi_sin_abs, uuids_pub_sin_doi_sin_abs #uuids_abs_pag, uuids_doi_pag, uuids_distinct_journal_article_pag
+            return revisados_pag, missing_title_pag, no_abstract_pag, missing_abs_pag, missing_abs_org_art, missing_doi_pag, missing_subjects_pag, type_journal_Article_pag, uuids_missing_abs_org_art, distinct_oaire_pag, pub_sin_doi_sin_abs, uuids_pub_sin_doi_sin_abs, sin_abstract_con_doi_pag, uuids_sin_abstract_con_doi_pag, sin_doi_ni_abstract_pag, uuids_sin_doi_ni_abstract_pag #uuids_abs_pag, uuids_doi_pag, uuids_distinct_journal_article_pag
 
         # Procesamos la página 0
-        rev, miss_title, no_abstract_pag, miss_abs, miss_abs_org_art, miss_doi, miss_subjects, type_journal_Article_pag, uuids_abs_org_art_pag0, dist_oaire_pag0, pub_sin_doi_sin_abs0, uuids_pub_sin_doi_sin_abs0 = procesar_items(resultado_inicial.get("items", []))
+        rev, miss_title, no_abstract_pag, miss_abs, miss_abs_org_art, miss_doi, miss_subjects, type_journal_Article_pag, uuids_abs_org_art_pag0, dist_oaire_pag0, pub_sin_doi_sin_abs0, uuids_pub_sin_doi_sin_abs0, sin_abs_con_doi0, uuids_sin_abs_con_doi0, sin_doi_ni_abstract0, uuids_sin_doi_ni_abstract0 = procesar_items(resultado_inicial.get("items", []))
         total_revisados += rev
         total_missing_title+= miss_title
         total_missing_abs += miss_abs
@@ -278,6 +299,10 @@ class DSpaceService:
         total_distinct_oaire_types.update(dist_oaire_pag0)
         total_pub_sin_doi_sin_abs += pub_sin_doi_sin_abs0
         total_uuids_pub_sin_doi_sin_abs.extend(uuids_pub_sin_doi_sin_abs0)
+        total_sin_abstract_con_doi += sin_abs_con_doi0
+        total_uuids_sin_abstract_con_doi.extend(uuids_sin_abs_con_doi0)
+        total_sin_doi_ni_abstract += sin_doi_ni_abstract0
+        total_uuids_sin_doi_ni_abstract.extend(uuids_sin_doi_ni_abstract0)
         #total_distinct_journal_article.extend(uuids_distinct_journal)
         #uuids_sin_abstract.extend(uuids_abs)
         #uuids_sin_doi.extend(uuids_doi)
@@ -293,7 +318,7 @@ class DSpaceService:
                         return procesar_items(resultado.get("items", []))
                     except Exception as e:
                         print(f"Error procesando página {page_num}: {e}")
-                        return 0, 0, 0, 0, 0, 0, 0, 0, [], set(), 0, [] #[], [], []
+                        return 0, 0, 0, 0, 0, 0, 0, 0, [], set(), 0, [], 0, [], 0, [] #[], [], []
 
             # Tareas para el resto de las páginas
             tareas = [fetch_and_process_page(p) for p in range(1, total_pages)]
@@ -301,7 +326,7 @@ class DSpaceService:
             resultados_paginas = await asyncio.gather(*tareas)
 
             # Sumamos resultados
-            for rev, miss_title, no_abstract_pag, miss_abs, miss_abs_org_art, miss_doi, miss_subjects, type_journal_Article_pag, uuids_abs_org_art_pag, dist_oaire_pag, pub_sin_doi_sin_abs_pag, uuids_pub_sin_doi_sin_abs_pag in resultados_paginas:
+            for rev, miss_title, no_abstract_pag, miss_abs, miss_abs_org_art, miss_doi, miss_subjects, type_journal_Article_pag, uuids_abs_org_art_pag, dist_oaire_pag, pub_sin_doi_sin_abs_pag, uuids_pub_sin_doi_sin_abs_pag, sin_abs_con_doi_pag, uuids_sin_abs_con_doi_pag, sin_doi_ni_abstract_pag, uuids_sin_doi_ni_abstract_pag in resultados_paginas:
                 total_revisados += rev
                 total_missing_title+= miss_title
                 total_no_abstract += no_abstract_pag
@@ -314,6 +339,10 @@ class DSpaceService:
                 total_distinct_oaire_types.update(dist_oaire_pag)
                 total_pub_sin_doi_sin_abs += pub_sin_doi_sin_abs_pag
                 total_uuids_pub_sin_doi_sin_abs.extend(uuids_pub_sin_doi_sin_abs_pag)
+                total_sin_abstract_con_doi += sin_abs_con_doi_pag
+                total_uuids_sin_abstract_con_doi.extend(uuids_sin_abs_con_doi_pag)
+                total_sin_doi_ni_abstract += sin_doi_ni_abstract_pag
+                total_uuids_sin_doi_ni_abstract.extend(uuids_sin_doi_ni_abstract_pag)
                 #total_distinct_journal_article.extend(uuids_distinct_journal)
                 #uuids_sin_abstract.extend(uuids_abs)
                 #uuids_sin_doi.extend(uuids_doi)
@@ -324,13 +353,17 @@ class DSpaceService:
             "total_sin_abstract": total_missing_abs,
             "total_no_abstract_disponible": total_no_abstract,
             "total_missing_abs_org_art": total_missing_abs_org_art,
-            "uuids_missing_abs_org_art": total_uuids_missing_abs_org_art,
-            "distinct_oaire_resource_types": list(total_distinct_oaire_types),
+            #"distinct_oaire_resource_types": list(total_distinct_oaire_types),
             "total_sin_doi": total_missing_doi,
             "total_sin_subjects": total_missing_subjects,
-            "total_type_journal_Article": total_type_journal_Article,
+            #"total_type_journal_Article": total_type_journal_Article,
             "total_pub_sin_doi_sin_abs": total_pub_sin_doi_sin_abs,
+            "total_sin_abstract_con_doi": total_sin_abstract_con_doi,
+            "total_sin_doi_ni_abstract": total_sin_doi_ni_abstract,        
+            "uuids_missing_abs_org_art": total_uuids_missing_abs_org_art,
             "uuids_pub_sin_doi_sin_abs": total_uuids_pub_sin_doi_sin_abs,
+            "uuids_sin_abstract_con_doi": total_uuids_sin_abstract_con_doi,
+            "uuids_sin_doi_ni_abstract": total_uuids_sin_doi_ni_abstract,
             #"uuids_distinct_journal_article": total_distinct_journal_article,
             #"uuids_sin_abstract": uuids_sin_abstract,
             #"uuids_sin_doi": uuids_sin_doi
