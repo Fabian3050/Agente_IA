@@ -93,7 +93,8 @@ class DSpaceService:
             "type": get_metadata_value("dc.type", "No disponible"),
             "oaire_resourcetype": get_metadata_value("oaire.resourceType", "No disponible"),
             "keywords": get_metadata_values_list("dc.subject"), # Puede tener múltiples valores
-            "uri": get_metadata_value("dc.identifier.uri") # Link público usualmente
+            "uri": get_metadata_value("dc.identifier.uri"), # Link público usualmente
+            "all_metadata": metadata
         }
         
     async def get_metadata(self, identifier: str):
@@ -272,12 +273,12 @@ class DSpaceService:
                 is_missing_abstract = abs_val in ["No disponible", "", "Sin resumen", "[No abstract available]"]
                 doi_val = item.get("doi")
                 has_doi = doi_val not in ["No disponible", "", None]
-                if is_missing_abstract and has_doi and oaire_val in oaire_val:
+                if is_missing_abstract and has_doi and oaire_val in valid_resource_types:
                     sin_abstract_con_doi_pag += 1
                     uuids_sin_abstract_con_doi_pag.append(item.get("uuid"))
                     
                 is_missing_doi = doi_val in ["No disponible", "", None]
-                if is_missing_abstract and is_missing_doi:
+                if is_missing_abstract and is_missing_doi and oaire_val in valid_resource_types:
                     sin_doi_ni_abstract_pag += 1
                     uuids_sin_doi_ni_abstract_pag.append(item.get("uuid"))
                 #else:

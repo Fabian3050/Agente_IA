@@ -2,12 +2,58 @@ import asyncio
 from typing import List, Optional
 from app.models.metadata_model import MetadataResponse
 from app.clients.crossref_client import search_crossref, get_by_doi_crossref, get_doi_by_title_and_abstract_crossref
-from app.clients.openalex_client import search_openalex, get_by_doi_openalex, get_doi_by_title_and_abstract_openalex
+from app.clients.openalex_client import OpenAlexClient
+import httpx
 from app.clients.semantic_scholar_client import search_semantic_scholar, get_by_doi_semantic_scholar, get_doi_by_title_and_abstract_semantic_scholar
 from app.clients.europe_pmc_client import search_europe_pmc, get_by_doi_europe_pmc, get_doi_by_title_and_abstract_europe_pmc
 from app.clients.unpaywall_client import search_unpaywall, get_by_doi_unpaywall
 
 class MetadataService:
+    def __init__(self):
+        self.openalex_client = OpenAlexClient(email="agente_ia@example.com")
+
+    async def _search_openalex_wrapper(self, query: str, limit: int) -> List[MetadataResponse]:
+        candidates = await self.openalex_client.search_candidates_by_title(title=query, limit=limit)
+        results = []
+        for c in candidates:
+            m = c["metadata"]
+            results.append(MetadataResponse(
+                title=m.title,
+                authors=m.authors,
+                doi=m.doi,
+                year=m.year,
+                source=m.source,
+                url=m.url,
+                abstract=m.abstract,
+                keywords=m.keywords,
+                funding_source=m.funding_source,
+                ods=m.ods,
+                derechos_acceso=m.derechos_acceso
+            ))
+        return results
+
+    async def _get_by_doi_openalex_wrapper(self, doi: str) -> Optional[MetadataResponse]:
+        async with httpx.AsyncClient() as client:
+            m = await self.openalex_client.get_by_doi(doi, client)
+        if m:
+            return MetadataResponse(
+                title=m.title,
+                authors=m.authors,
+                doi=m.doi,
+                year=m.year,
+                source=m.source,
+                url=m.url,
+                abstract=m.abstract,
+                keywords=m.keywords,
+                funding_source=m.funding_source,
+                ods=m.ods,
+                derechos_acceso=m.derechos_acceso
+            )
+        return None
+
+    async def _get_doi_by_title_and_abstract_openalex_wrapper(self, title: Optional[str], abstract: Optional[str]) -> Optional[str]:
+        return await self.openalex_client.get_doi_by_title_and_abstract(title=title, abstract=abstract)
+
     async def search_metadata(self, query: str, source: Optional[str] = None, limit_per_source: int = 5) -> List[MetadataResponse]:
         """
         Busca metadatos. Si 'source' es especificado, busca solo en ese proveedor.
@@ -20,7 +66,7 @@ class MetadataService:
             if source == "crossref":
                 results.extend(await search_crossref(query, limit_per_source))
             elif source == "openalex":
-                results.extend(await search_openalex(query, limit_per_source))
+                results.extend(await self._search_openalex_wrapper(query, limit_per_source))
             elif source == "semanticscholar":
                 results.extend(await search_semantic_scholar(query, limit_per_source))
             elif source == "europepmc":
@@ -31,7 +77,7 @@ class MetadataService:
             # Búsqueda concurrente en todos los clientes
             tasks = [
                 search_crossref(query, limit_per_source),
-                search_openalex(query, limit_per_source),
+                self._search_openalex_wrapper(query, limit_per_source),
                 search_semantic_scholar(query, limit_per_source),
                 search_europe_pmc(query, limit_per_source),
                 search_unpaywall(query, limit_per_source)
@@ -60,7 +106,7 @@ class MetadataService:
                 res = await get_by_doi_crossref(doi)
                 if res: results.append(res)
             elif source == "openalex":
-                res = await get_by_doi_openalex(doi)
+                res = await self._get_by_doi_openalex_wrapper(doi)
                 if res: results.append(res)
             elif source == "semanticscholar":
                 res = await get_by_doi_semantic_scholar(doi)
@@ -74,7 +120,7 @@ class MetadataService:
         else:
             tasks = [
                 get_by_doi_crossref(doi),
-                get_by_doi_openalex(doi),
+                self._get_by_doi_openalex_wrapper(doi),
                 get_by_doi_semantic_scholar(doi),
                 get_by_doi_europe_pmc(doi),
                 get_by_doi_unpaywall(doi)
@@ -103,7 +149,7 @@ class MetadataService:
             if source == "crossref":
                 return await get_doi_by_title_and_abstract_crossref(title, abstract)
             elif source == "openalex":
-                return await get_doi_by_title_and_abstract_openalex(title, abstract)
+                return await self._get_doi_by_title_and_abstract_openalex_wrapper(title, abstract)
             elif source == "semanticscholar":
                 return await get_doi_by_title_and_abstract_semantic_scholar(title, abstract)
             elif source == "europepmc":
@@ -112,7 +158,7 @@ class MetadataService:
             
         tasks = [
             asyncio.create_task(get_doi_by_title_and_abstract_crossref(title, abstract)),
-            asyncio.create_task(get_doi_by_title_and_abstract_openalex(title, abstract)),
+            asyncio.create_task(self._get_doi_by_title_and_abstract_openalex_wrapper(title, abstract)),
             asyncio.create_task(get_doi_by_title_and_abstract_semantic_scholar(title, abstract)),
             asyncio.create_task(get_doi_by_title_and_abstract_europe_pmc(title, abstract))
         ]
