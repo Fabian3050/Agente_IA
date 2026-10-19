@@ -171,10 +171,11 @@ class DSpaceService:
                     
         return {"error": f"No se encontró ningún registro con el UUID {identifier} en todo el repositorio."}
 
-    async def count_missing_metadata_optimized(self, size: int = 100, max_concurrent: int = 5):
+    async def count_missing_metadata_optimized(self, size: int = 100, max_concurrent: int = 5, save_to_db: bool = False, db = None):
         """
         Recorre el repositorio en paralelo para máxima velocidad.
-        Cuenta ítems sin abstract y sin DOI.
+        Cuenta ítems sin abstract y sin DOI dentro de valid_resource_types.
+        Opcionalmente guarda el histórico de métricas y la cola de enriquecimiento en base de datos.
         """
         print("Iniciando escaneo optimizado de metadatos faltantes...")
         
@@ -186,6 +187,7 @@ class DSpaceService:
         print(f"Total de páginas a procesar: {total_pages} (a {size} ítems por página)")
 
         total_revisados = 0
+        total_valid_resource_types = 0
         total_missing_title= 0
         total_missing_abs = 0
         total_no_abstract = 0
@@ -193,9 +195,6 @@ class DSpaceService:
         total_missing_doi = 0
         total_missing_subjects = 0
         total_type_journal_Article = 0
-        #total_distinct_journal_article = []
-        #uuids_sin_abstract = []
-        #uuids_sin_doi = []
         total_uuids_missing_abs_org_art = []
         total_uuids_pub_sin_doi_sin_abs = []
         total_distinct_oaire_types = set()
@@ -204,9 +203,28 @@ class DSpaceService:
         total_uuids_sin_abstract_con_doi = []
         total_sin_doi_ni_abstract = 0
         total_uuids_sin_doi_ni_abstract = []
+        total_candidatos_enriquecimiento = []
+
+        valid_resource_types = {
+            "patente",
+            "texto",
+            "texto::artículo preliminar",
+            "texto::contribución de congreso::actas de congreso::comunicación de congreso",
+            #"texto::contribución de congreso::comunicación no publicada en actas de congreso",
+            #"texto::contribución de congreso::presentación de congreso",
+            "texto::informe",
+            "texto::informe::estudio clínico",
+            "texto::informe::informe técnico",
+            "texto::libro::capítulo de libro",
+            "texto::ponencia",
+            "texto::revista::artículo",
+            "texto::revista::artículo::artículo de revisión",
+            "texto::revista::artículo::artículo original"
+        }
 
         def procesar_items(items):
             revisados_pag = len(items)
+            valid_resource_types_pag = 0
             missing_title_pag = 0
             missing_abs_pag = 0
             no_abstract_pag = 0
@@ -222,73 +240,102 @@ class DSpaceService:
             uuids_sin_abstract_con_doi_pag = []
             sin_doi_ni_abstract_pag = 0
             uuids_sin_doi_ni_abstract_pag = []
-            #uuids_abs_pag = []
-            #uuids_doi_pag = []
-            #uuids_distinct_journal_article_pag = []
+            candidatos_pag = []
             
             for item in items:
-                if item.get("abstract") == "No disponible" or item.get("abstract") == "" or item.get("abstract") == "Sin resumen":
-                    missing_abs_pag += 1
-                    #uuids_abs_pag.append(item.get("uuid"))
-                valid_resource_types = {
-                    "patente",
-                    "texto",
-                    "texto::artículo preliminar",
-                    "texto::contribución de congreso::actas de congreso::comunicación de congreso",
-                    "texto::contribución de congreso::comunicación no publicada en actas de congreso",
-                    "texto::contribución de congreso::presentación de congreso",
-                    "texto::informe",
-                    "texto::informe::estudio clínico",
-                    "texto::informe::informe técnico",
-                    "texto::libro::capítulo de libro",
-                    "texto::ponencia",
-                    "texto::revista::artículo",
-                    "texto::revista::artículo::artículo de revisión",
-                    "texto::revista::artículo::artículo original"
-                }
-                
-                if (item.get("abstract") == "No disponible" or item.get("abstract") == "" or item.get("abstract") == "Sin resumen") and item.get("oaire_resourcetype") in valid_resource_types:
-                    missing_abs_org_art += 1    
-                    uuids_missing_abs_org_art.append(item.get("uuid"))
-                if item.get("abstract") == "[No abstract available]":
-                    no_abstract_pag += 1
-                if item.get("doi") == "No disponible" or item.get("doi") == "":
-                    missing_doi_pag += 1
-                   # uuids_doi_pag.append(item.get("uuid"))
-                if item.get("title") == "No disponible" or item.get("title") == "":
-                    missing_title_pag += 1
-                if not item.get("keywords"):
-                    missing_subjects_pag += 1
-                if item.get("type") == "text::journal::journal article":
-                    type_journal_Article_pag += 1
-                    
                 oaire_val = item.get("oaire_resourcetype")
                 if oaire_val and oaire_val not in valid_resource_types:
                     distinct_oaire_pag.add(oaire_val)
-                if oaire_val and oaire_val not in valid_resource_types and (item.get("doi") == "No disponible" or item.get("doi") == "") and (item.get("abstract") == "No disponible" or item.get("abstract") == "" or item.get("abstract") == "Sin resumen"):
-                    pub_sin_doi_sin_abs += 1
-                    uuids_pub_sin_doi_sin_abs.append(item.get("uuid"))
-                
+                    
+                # Solo procesar métricas y salidas para ítems dentro de valid_resource_types
+                if oaire_val not in valid_resource_types:
+                    continue
+
+                valid_resource_types_pag += 1
+                uuid = item.get("uuid")
+
+                # Abstract
                 abs_val = item.get("abstract")
-                is_missing_abstract = abs_val in ["No disponible", "", "Sin resumen", "[No abstract available]"]
+                is_missing_abs = abs_val in ["No disponible", "", "Sin resumen"]
+                is_no_abs_available = abs_val == "[No abstract available]"
+                is_any_missing_abs = is_missing_abs or is_no_abs_available
+
+                if is_missing_abs:
+                    missing_abs_pag += 1
+                    missing_abs_org_art += 1
+                    uuids_missing_abs_org_art.append(uuid)
+
+                if is_no_abs_available:
+                    no_abstract_pag += 1
+
+                # DOI
                 doi_val = item.get("doi")
-                has_doi = doi_val not in ["No disponible", "", None]
-                if is_missing_abstract and has_doi and oaire_val in valid_resource_types:
-                    sin_abstract_con_doi_pag += 1
-                    uuids_sin_abstract_con_doi_pag.append(item.get("uuid"))
-                    
                 is_missing_doi = doi_val in ["No disponible", "", None]
-                if is_missing_abstract and is_missing_doi and oaire_val in valid_resource_types:
+                has_doi = not is_missing_doi
+
+                if is_missing_doi:
+                    missing_doi_pag += 1
+
+                # Title
+                title_val = item.get("title")
+                if title_val in ["No disponible", "", "Sin título", None]:
+                    missing_title_pag += 1
+
+                # Keywords / Subjects
+                if not item.get("keywords"):
+                    missing_subjects_pag += 1
+
+                # Type
+                if item.get("type") == "text::journal::journal article":
+                    type_journal_Article_pag += 1
+
+                # Sin abstract con DOI (dentro de valid_resource_types)
+                if is_any_missing_abs and has_doi:
+                    sin_abstract_con_doi_pag += 1
+                    uuids_sin_abstract_con_doi_pag.append(uuid)
+
+                # Sin DOI ni abstract (dentro de valid_resource_types)
+                if is_any_missing_abs and is_missing_doi:
                     sin_doi_ni_abstract_pag += 1
-                    uuids_sin_doi_ni_abstract_pag.append(item.get("uuid"))
-                #else:
-                 #   uuids_distinct_journal_article_pag.append(item.get("uuid"))
+                    uuids_sin_doi_ni_abstract_pag.append(uuid)
+                    pub_sin_doi_sin_abs += 1
+                    uuids_pub_sin_doi_sin_abs.append(uuid)
+
+                # Si le falta abstract o DOI, es candidato para la cola de enriquecimiento
+                if is_any_missing_abs or is_missing_doi:
+                    falencia = (
+                        "SIN_ABSTRACT_CON_DOI" if (is_any_missing_abs and has_doi) else
+                        "SIN_DOI_NI_ABSTRACT" if (is_any_missing_abs and is_missing_doi) else
+                        "SIN_DOI" if is_missing_doi else
+                        "SIN_ABSTRACT"
+                    )
+                    candidatos_pag.append({
+                        "dspace_uuid": uuid,
+                        "doi": doi_val if has_doi else None,
+                        "titulo": title_val if title_val not in ["No disponible", "", "Sin título", None] else None,
+                        "tipo_recurso": oaire_val,
+                        "tipo_falencia": falencia,
+                        "resumen_original": abs_val if not is_any_missing_abs else None
+                    })
                     
-            return revisados_pag, missing_title_pag, no_abstract_pag, missing_abs_pag, missing_abs_org_art, missing_doi_pag, missing_subjects_pag, type_journal_Article_pag, uuids_missing_abs_org_art, distinct_oaire_pag, pub_sin_doi_sin_abs, uuids_pub_sin_doi_sin_abs, sin_abstract_con_doi_pag, uuids_sin_abstract_con_doi_pag, sin_doi_ni_abstract_pag, uuids_sin_doi_ni_abstract_pag #uuids_abs_pag, uuids_doi_pag, uuids_distinct_journal_article_pag
+            return (
+                revisados_pag, missing_title_pag, no_abstract_pag, missing_abs_pag, missing_abs_org_art,
+                missing_doi_pag, missing_subjects_pag, type_journal_Article_pag, uuids_missing_abs_org_art,
+                distinct_oaire_pag, pub_sin_doi_sin_abs, uuids_pub_sin_doi_sin_abs, sin_abstract_con_doi_pag,
+                uuids_sin_abstract_con_doi_pag, sin_doi_ni_abstract_pag, uuids_sin_doi_ni_abstract_pag,
+                valid_resource_types_pag, candidatos_pag
+            )
 
         # Procesamos la página 0
-        rev, miss_title, no_abstract_pag, miss_abs, miss_abs_org_art, miss_doi, miss_subjects, type_journal_Article_pag, uuids_abs_org_art_pag0, dist_oaire_pag0, pub_sin_doi_sin_abs0, uuids_pub_sin_doi_sin_abs0, sin_abs_con_doi0, uuids_sin_abs_con_doi0, sin_doi_ni_abstract0, uuids_sin_doi_ni_abstract0 = procesar_items(resultado_inicial.get("items", []))
+        (
+            rev, miss_title, no_abstract_pag, miss_abs, miss_abs_org_art, miss_doi, miss_subjects,
+            type_journal_Article_pag, uuids_abs_org_art_pag0, dist_oaire_pag0, pub_sin_doi_sin_abs0,
+            uuids_pub_sin_doi_sin_abs0, sin_abs_con_doi0, uuids_sin_abs_con_doi0, sin_doi_ni_abstract0,
+            uuids_sin_doi_ni_abstract0, valid_res_pag0, cand_pag0
+        ) = procesar_items(resultado_inicial.get("items", []))
+
         total_revisados += rev
+        total_valid_resource_types += valid_res_pag0
         total_missing_title+= miss_title
         total_missing_abs += miss_abs
         total_no_abstract += no_abstract_pag
@@ -304,9 +351,7 @@ class DSpaceService:
         total_uuids_sin_abstract_con_doi.extend(uuids_sin_abs_con_doi0)
         total_sin_doi_ni_abstract += sin_doi_ni_abstract0
         total_uuids_sin_doi_ni_abstract.extend(uuids_sin_doi_ni_abstract0)
-        #total_distinct_journal_article.extend(uuids_distinct_journal)
-        #uuids_sin_abstract.extend(uuids_abs)
-        #uuids_sin_doi.extend(uuids_doi)
+        total_candidatos_enriquecimiento.extend(cand_pag0)
 
         if total_pages > 1:
             semaphore = asyncio.Semaphore(max_concurrent)
@@ -319,7 +364,7 @@ class DSpaceService:
                         return procesar_items(resultado.get("items", []))
                     except Exception as e:
                         print(f"Error procesando página {page_num}: {e}")
-                        return 0, 0, 0, 0, 0, 0, 0, 0, [], set(), 0, [], 0, [], 0, [] #[], [], []
+                        return 0, 0, 0, 0, 0, 0, 0, 0, [], set(), 0, [], 0, [], 0, [], 0, []
 
             # Tareas para el resto de las páginas
             tareas = [fetch_and_process_page(p) for p in range(1, total_pages)]
@@ -327,8 +372,14 @@ class DSpaceService:
             resultados_paginas = await asyncio.gather(*tareas)
 
             # Sumamos resultados
-            for rev, miss_title, no_abstract_pag, miss_abs, miss_abs_org_art, miss_doi, miss_subjects, type_journal_Article_pag, uuids_abs_org_art_pag, dist_oaire_pag, pub_sin_doi_sin_abs_pag, uuids_pub_sin_doi_sin_abs_pag, sin_abs_con_doi_pag, uuids_sin_abs_con_doi_pag, sin_doi_ni_abstract_pag, uuids_sin_doi_ni_abstract_pag in resultados_paginas:
+            for (
+                rev, miss_title, no_abstract_pag, miss_abs, miss_abs_org_art, miss_doi, miss_subjects,
+                type_journal_Article_pag, uuids_abs_org_art_pag, dist_oaire_pag, pub_sin_doi_sin_abs_pag,
+                uuids_pub_sin_doi_sin_abs_pag, sin_abs_con_doi_pag, uuids_sin_abs_con_doi_pag,
+                sin_doi_ni_abstract_pag, uuids_sin_doi_ni_abstract_pag, valid_res_pag, cand_pag
+            ) in resultados_paginas:
                 total_revisados += rev
+                total_valid_resource_types += valid_res_pag
                 total_missing_title+= miss_title
                 total_no_abstract += no_abstract_pag
                 total_missing_abs += miss_abs
@@ -344,20 +395,21 @@ class DSpaceService:
                 total_uuids_sin_abstract_con_doi.extend(uuids_sin_abs_con_doi_pag)
                 total_sin_doi_ni_abstract += sin_doi_ni_abstract_pag
                 total_uuids_sin_doi_ni_abstract.extend(uuids_sin_doi_ni_abstract_pag)
-                #total_distinct_journal_article.extend(uuids_distinct_journal)
-                #uuids_sin_abstract.extend(uuids_abs)
-                #uuids_sin_doi.extend(uuids_doi)
+                total_candidatos_enriquecimiento.extend(cand_pag)
 
-        return {
+        total_elements = page_info.get("totalElements")
+        if total_elements is not None:
+            total_revisados = total_elements
+
+        resultado = {
             "total_revisados": total_revisados,
+            "total_valid_resource_types": total_valid_resource_types,
             "total_sin_title": total_missing_title,
             "total_sin_abstract": total_missing_abs,
             "total_no_abstract_disponible": total_no_abstract,
             "total_missing_abs_org_art": total_missing_abs_org_art,
-            #"distinct_oaire_resource_types": list(total_distinct_oaire_types),
             "total_sin_doi": total_missing_doi,
             "total_sin_subjects": total_missing_subjects,
-            #"total_type_journal_Article": total_type_journal_Article,
             "total_pub_sin_doi_sin_abs": total_pub_sin_doi_sin_abs,
             "total_sin_abstract_con_doi": total_sin_abstract_con_doi,
             "total_sin_doi_ni_abstract": total_sin_doi_ni_abstract,        
@@ -365,7 +417,70 @@ class DSpaceService:
             "uuids_pub_sin_doi_sin_abs": total_uuids_pub_sin_doi_sin_abs,
             "uuids_sin_abstract_con_doi": total_uuids_sin_abstract_con_doi,
             "uuids_sin_doi_ni_abstract": total_uuids_sin_doi_ni_abstract,
-            #"uuids_distinct_journal_article": total_distinct_journal_article,
-            #"uuids_sin_abstract": uuids_sin_abstract,
-            #"uuids_sin_doi": uuids_sin_doi
+        }
+
+        if save_to_db and db is not None:
+            guardado_info = self.save_audit_and_queue(resultado, total_candidatos_enriquecimiento, db)
+            resultado["db_guardado"] = guardado_info
+
+        return resultado
+
+    def save_audit_and_queue(self, resultado_metricas: dict, candidatos: list, db):
+        """
+        Persiste el snapshot histórico de métricas en DSpaceMetricsHistory
+        y registra los ítems candidatos a enriquecer en DSpaceEnrichmentQueue.
+        """
+        from app.models.db_models import DSpaceMetricsHistory, DSpaceEnrichmentQueue
+
+        # 1. Guardar Snapshot histórico
+        snapshot = DSpaceMetricsHistory(
+            total_revisados=resultado_metricas.get("total_revisados", 0),
+            total_valid_resource_types=resultado_metricas.get("total_valid_resource_types", 0),
+            total_sin_title=resultado_metricas.get("total_sin_title", 0),
+            total_sin_abstract=resultado_metricas.get("total_sin_abstract", 0),
+            total_no_abstract_disponible=resultado_metricas.get("total_no_abstract_disponible", 0),
+            total_missing_abs_org_art=resultado_metricas.get("total_missing_abs_org_art", 0),
+            total_sin_doi=resultado_metricas.get("total_sin_doi", 0),
+            total_sin_subjects=resultado_metricas.get("total_sin_subjects", 0),
+            total_pub_sin_doi_sin_abs=resultado_metricas.get("total_pub_sin_doi_sin_abs", 0),
+            total_sin_abstract_con_doi=resultado_metricas.get("total_sin_abstract_con_doi", 0),
+            total_sin_doi_ni_abstract=resultado_metricas.get("total_sin_doi_ni_abstract", 0),
+        )
+        db.add(snapshot)
+        db.flush()
+
+        # 2. Poblar cola de enriquecimiento evitando duplicados
+        candidate_uuids = [c["dspace_uuid"] for c in candidatos if c.get("dspace_uuid")]
+        existing_uuids = set()
+        for i in range(0, len(candidate_uuids), 1000):
+            batch = candidate_uuids[i:i+1000]
+            rows = db.query(DSpaceEnrichmentQueue.dspace_uuid).filter(DSpaceEnrichmentQueue.dspace_uuid.in_(batch)).all()
+            existing_uuids.update(r[0] for r in rows)
+
+        new_items = []
+        seen_uuids = set()
+        for c in candidatos:
+            uuid = c.get("dspace_uuid")
+            if uuid and uuid not in existing_uuids and uuid not in seen_uuids:
+                seen_uuids.add(uuid)
+                new_items.append(DSpaceEnrichmentQueue(
+                    dspace_uuid=uuid,
+                    doi=c.get("doi"),
+                    titulo=c.get("titulo"),
+                    tipo_recurso=c.get("tipo_recurso"),
+                    tipo_falencia=c.get("tipo_falencia"),
+                    estado="PENDIENTE",
+                    resumen_original=c.get("resumen_original")
+                ))
+
+        if new_items:
+            db.bulk_save_objects(new_items)
+
+        db.commit()
+
+        return {
+            "snapshot_id": snapshot.id,
+            "total_candidatos_detectados": len(candidatos),
+            "nuevos_en_cola": len(new_items),
+            "ya_existentes_en_cola": len(seen_uuids & existing_uuids) if seen_uuids else 0
         }

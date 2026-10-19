@@ -33,34 +33,34 @@ class ClassificationService:
         
         # 3. Diseñar el Prompt para el llm
         prompt = f"""
-You are an expert academic librarian. Your task is to analyze a scientific article and select ONLY 1 or 2 OECD disciplines that best describe it.
+            Eres un bibliotecario académico experto. Tu tarea es analizar un artículo científico y seleccionar ÚNICAMENTE 1 o 2 disciplinas OCDE que mejor lo describan.
 
-ARTICLE DATA:
-- Title: {articulo.title}
-- Abstract: {articulo.abstract or 'Not available'}
+            DATOS DEL ARTÍCULO:
+            - Título: {articulo.title}
+            - Resumen: {articulo.abstract or 'No disponible'}
 
-LIST OF ALLOWED DISCIPLINES:
-{areas_texto}
+            LISTA DE DISCIPLINAS PERMITIDAS:
+            {areas_texto}
 
-STRICT RULES:
-1. SELECT A MAXIMUM OF 2 disciplines from the list above that best fit the article.
-2. DO NOT convert the whole list to JSON. ONLY return the 1 or 2 winning disciplines.
-3. Your output MUST be exclusively a valid JSON with the following exact keys (keys must remain in Spanish for parsing, but you can write the justification in Spanish or English):
+            REGLAS ESTRICTAS:
+            1. SELECCIONA UN MÁXIMO DE 2 disciplinas de la lista anterior que mejor se adapten al artículo.
+            2. NO conviertas toda la lista a JSON. Devuelve SOLAMENTE las 1 o 2 disciplinas seleccionadas.
+            3. Tu respuesta DEBE ser exclusivamente un JSON válido con las siguientes claves exactas (las claves deben mantenerse exactamente iguales para su procesamiento, y la justificación debe estar en español):
 
-{{
-  "clasificaciones": [
-    {{
-      "codigo_area": "ID",
-      "nombre_area": "Name",
-      "codigo_subarea": "ID",
-      "nombre_subarea": "Name",
-      "codigo_disciplina": "ID",
-      "nombre_disciplina": "Name",
-      "justificacion": "Why you chose this discipline for the article"
-    }}
-  ]
-}}
-"""
+            {{
+                "clasificaciones": [
+                    {{
+                        "codigo_area": "ID",
+                        "nombre_area": "Nombre del área",
+                        "codigo_subarea": "ID",
+                        "nombre_subarea": "Nombre de la subárea",
+                        "codigo_disciplina": "ID",
+                        "nombre_disciplina": "Nombre de la disciplina",
+                        "justificacion": "Explicación en español de por qué elegiste esta disciplina para el artículo"
+                    }}
+                ]
+            }}
+            """
 
         # 4. Consultar a Ollama
         ollama_req = OllamaGenerateRequest(
@@ -141,7 +141,7 @@ STRICT RULES:
                     - Abstract: {articulo.abstract or 'No disponible'}
                     - Palabras clave: {keywords_text}
 
-                    Clasifícalo en UNA O MÁS (si aplican varias) de los siguientes ODS disponibles que sea el más representativo y adecuado:
+                    Clasifícalo en Máximo DOS de los siguientes ODS disponibles que sea el más representativo y adecuado:
                     {areas_texto}
 
                     Responde estrictamente en formato JSON válido con la siguiente estructura (como una lista bajo la clave "clasificaciones"):

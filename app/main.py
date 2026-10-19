@@ -11,7 +11,7 @@ from app.api.unpaywall_router import router as unpaywall_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Importamos los modelos de SQLAlchemy para que se registren en la Base
-    from app.models.db_models import DoiRecord, DocumentMetadata
+    from app.models.db_models import DoiRecord, DocumentMetadata, DSpaceMetricsHistory, DSpaceEnrichmentQueue
     
     # Crea todas las tablas en la BD si no existen
     Base.metadata.create_all(bind=engine)
