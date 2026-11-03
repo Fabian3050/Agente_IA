@@ -13,7 +13,7 @@ Para ejecutar localmente el script `procesar_dois.py` y probar la completitud de
 ### 2. Configurar el Entorno
 Crea un entorno virtual e instala las dependencias:
 ```bash
-python -m venv venv
+python -m venv venv (Reemplazar python por python3 en Macbook)
 source venv/bin/activate  # En Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
@@ -39,8 +39,15 @@ Base.metadata.create_all(bind=engine)
 # 2. Insertar DOIs de prueba
 db = SessionLocal()
 dois_de_prueba = [
-    "10.1038/s41586-020-2649-2", # Ejemplo 1
-    "10.1126/science.1249098"    # Ejemplo 2
+    "10.1038/s41586-020-2649-2",
+    "10.1126/science.1249098",
+    "10.1177/16878140211010657",
+    "10.1016/j.robot.2024.104661",
+    "10.1155/2020/7816785",
+    "10.1117/12.911931",
+    "10.3390/ijms21217922",
+    "10.22481/praxisedu.v21i52.17106",
+    "10.5354/0719-2584.2025.74613"
 ]
 
 for doi in dois_de_prueba:

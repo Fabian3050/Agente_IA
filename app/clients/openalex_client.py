@@ -1,23 +1,8 @@
-from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 import httpx
-
-
-@dataclass
-class MetadataResponse:
-    title: str
-    authors: List[str] = field(default_factory=list)
-    doi: Optional[str] = None
-    year: Optional[int] = None
-    source: str = "openalex"
-    url: Optional[str] = None
-    abstract: Optional[str] = None
-    keywords: List[str] = field(default_factory=list)
-    funding_source: Optional[List[str]] = None
-    ods: Optional[List[str]] = None
-    derechos_acceso: str = "Desconocido"
+from app.models.metadata_model import MetadataResponse
 
 
 class OpenAlexClient:
@@ -256,3 +241,11 @@ class OpenAlexClient:
         return SequenceMatcher(
             None, a.lower().strip(), b.lower().strip()
         ).ratio()
+
+
+async def get_by_doi_openalex(doi: str, email: str = "agente_ia@example.com") -> Optional[MetadataResponse]:
+    """Helper directo para consultar un DOI en OpenAlex sin requerir instanciación manual."""
+    client_instance = OpenAlexClient(email=email)
+    async with httpx.AsyncClient() as client:
+        return await client_instance.get_by_doi(doi, client)
+

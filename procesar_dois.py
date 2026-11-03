@@ -3,7 +3,7 @@ import sys
 import os
 
 # Asegurar que la ruta base esté en el sys.path para importaciones absolutas
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from app.database import SessionLocal
 from app.models.db_models import DoiRecord, DocumentMetadata
