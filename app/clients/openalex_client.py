@@ -3,19 +3,21 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 import httpx
 from app.models.metadata_model import MetadataResponse
+from app.clients.unpaywall_client import _normalize_oa_status, _normalize_version_type
 
 
 class OpenAlexClient:
     """
     Cliente optimizado de OpenAlex para Agentes de IA y repositorios DSpace-CRIS.
-    Maneja el 'Polite Pool', des-indexación de abstracts, fuzzy matching y extracción de metadatos.
+    Maneja el 'Polite Pool', des-indexación de abstracts, fuzzy matching y separación
+    entre palabras clave del autor y conceptos automáticos (cris.concept).
     """
 
-    def __init__(self, email: str, timeout: float = 10.0):
+    def __init__(self, email: str = "agente_ia_vriic@usach.cl", timeout: float = 10.0):
         self.email = email
         self.timeout = timeout
         self.headers = {
-            "User-Agent": f"DSpaceCRIS-Agent/1.0 (mailto:{self.email})"
+            "User-Agent": f"DSpaceCRIS-Agent/3.0 (mailto:{self.email})"
         }
         self.base_url = "https://api.openalex.org/works"
 
@@ -38,61 +40,6 @@ class OpenAlexClient:
         except Exception as e:
             print(f"[OpenAlex] Error recuperando DOI '{doi}': {e}")
             return None
-
-    async def get_doi_by_title_and_abstract(
-        self,
-        title: Optional[str] = None,
-        abstract: Optional[str] = None,
-        client: Optional[httpx.AsyncClient] = None,
-        similarity_threshold: float = 0.85,
-    ) -> Optional[str]:
-        """
-        Busca el DOI de una publicación dada una coincidencia por título/abstract.
-        Aplica Fuzzy Matching para prevenir falsos positivos antes de retornar el DOI.
-        """
-        if not title and not abstract:
-            return None
-
-        local_client = client or httpx.AsyncClient()
-        params: Dict[str, Any] = {
-            "per-page": 5,
-            "mailto": self.email,
-        }
-
-        if title:
-            params["filter"] = f"title.search:{title}"
-        elif abstract:
-            params["search"] = abstract[:300]
-
-        try:
-            response = await local_client.get(
-                self.base_url,
-                params=params,
-                headers=self.headers,
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-            results = response.json().get("results", [])
-
-            for candidate in results:
-                candidate_title = candidate.get("title") or ""
-
-                if title:
-                    score = self._calculate_similarity(title, candidate_title)
-                    if score < similarity_threshold:
-                        continue  # Salta si la similitud no supera el umbral
-
-                retrieved_doi = candidate.get("doi")
-                if retrieved_doi:
-                    return retrieved_doi.replace("https://doi.org/", "").strip()
-
-        except Exception as e:
-            print(f"[OpenAlex] Error buscando DOI por título/abstract: {e}")
-        finally:
-            if not client:
-                await local_client.aclose()
-
-        return None
 
     async def search_candidates_by_title(
         self,
@@ -153,7 +100,7 @@ class OpenAlexClient:
         return candidates
 
     def _parse_openalex_item(self, item: Dict[str, Any]) -> MetadataResponse:
-        """Extrae y normaliza los metadatos desde el JSON de OpenAlex."""
+        """Extrae y normaliza los metadatos desde el JSON de OpenAlex según Sección 3.4."""
         title = item.get("title") or "Sin título"
 
         authors = [
@@ -173,6 +120,7 @@ class OpenAlexClient:
             item.get("abstract_inverted_index")
         )
 
+        # Palabras clave del autor (dc.subject)
         keywords = []
         if item.get("keywords"):
             keywords = [
@@ -181,14 +129,34 @@ class OpenAlexClient:
                 if kw.get("display_name")
             ]
 
+        # Conceptos automáticos algorítmicos (cris.concept)
+        automated_concepts = []
+        if item.get("concepts"):
+            automated_concepts = [
+                c.get("display_name")
+                for c in item.get("concepts", [])
+                if c.get("display_name")
+            ]
+
+        # Financiamiento desglosado
         funding_source = []
-        for grant in item.get("grants", []):
-            funder = grant.get("funder_display_name")
-            if funder:
-                funding_source.append(funder)
-        funding_source = (
-            list(dict.fromkeys(funding_source)) if funding_source else None
-        )
+        funding_agency = None
+        funding_id = None
+        funding_grant_number = None
+
+        grants = item.get("grants", [])
+        if grants:
+            first_grant = grants[0]
+            funding_agency = first_grant.get("funder_display_name")
+            funding_id = first_grant.get("funder")
+            funding_grant_number = first_grant.get("award_id")
+
+            for g in grants:
+                funder = g.get("funder_display_name")
+                if funder:
+                    funding_source.append(funder)
+
+        funding_source = list(dict.fromkeys(funding_source)) if funding_source else None
 
         ods = []
         for sdg in item.get("sustainable_development_goals", []):
@@ -196,12 +164,12 @@ class OpenAlexClient:
                 ods.append(sdg.get("display_name"))
         ods = list(dict.fromkeys(ods)) if ods else None
 
-        is_oa = item.get("open_access", {}).get("is_oa")
-        derechos_acceso = (
-            "Abierto"
-            if is_oa is True
-            else ("Cerrado" if is_oa is False else "Desconocido")
-        )
+        oa_info = item.get("open_access", {})
+        oa_status = _normalize_oa_status(oa_info.get("oa_status"))
+        
+        primary_loc = item.get("primary_location") or {}
+        version_type = _normalize_version_type(primary_loc.get("version"))
+        license_val = primary_loc.get("license")
 
         return MetadataResponse(
             title=title,
@@ -212,16 +180,24 @@ class OpenAlexClient:
             url=item_url,
             abstract=abstract,
             keywords=keywords,
+            author_keywords=keywords,
+            automated_concepts=automated_concepts,
             funding_source=funding_source,
+            funding_agency=funding_agency,
+            funding_id=funding_id,
+            funding_grant_number=funding_grant_number,
             ods=ods,
-            derechos_acceso=derechos_acceso,
+            oa_status=oa_status,
+            version_type=version_type,
+            license=license_val,
+            derechos_acceso=oa_status
         )
 
     @staticmethod
     def _reconstruct_abstract(
         inverted_index: Optional[Dict[str, List[int]]]
     ) -> Optional[str]:
-        """Reconstruye el Abstract de OpenAlex partiendo del formato inverted_index."""
+        """Reconstruye sintácticamente el Abstract a partir del índice invertido de OpenAlex."""
         if not inverted_index:
             return None
 
@@ -235,7 +211,6 @@ class OpenAlexClient:
 
     @staticmethod
     def _calculate_similarity(a: str, b: str) -> float:
-        """Calcula el ratio de similitud básica entre dos cadenas de texto."""
         if not a or not b:
             return 0.0
         return SequenceMatcher(
@@ -243,9 +218,7 @@ class OpenAlexClient:
         ).ratio()
 
 
-async def get_by_doi_openalex(doi: str, email: str = "agente_ia@example.com") -> Optional[MetadataResponse]:
-    """Helper directo para consultar un DOI en OpenAlex sin requerir instanciación manual."""
+async def get_by_doi_openalex(doi: str, email: str = "agente_ia_vriic@usach.cl") -> Optional[MetadataResponse]:
     client_instance = OpenAlexClient(email=email)
     async with httpx.AsyncClient() as client:
         return await client_instance.get_by_doi(doi, client)
-

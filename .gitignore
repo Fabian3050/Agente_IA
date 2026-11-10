@@ -1,10 +1,74 @@
-.DS_Store
+# =============================================================================
+# Python Bytecode & Cache
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# =============================================================================
+# Entornos Virtuales
+# =============================================================================
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# =============================================================================
+# Variables de Entorno y Secretos
+# =============================================================================
 .env
-__pycache__
-.venv
-venv
+.env.*
+!.env.example
+secrets/*.txt
+!secrets/.gitkeep
+
+# =============================================================================
+# Caches de Aplicación y Pruebas
+# =============================================================================
+cache_dspace/
 cache_dspace/*
-app/models/__pycache__/*
-app/clients/__pycache__/*
-app/services/__pycache__/*
-app/api/__pycache__/*
+.cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# =============================================================================
+# Sistema Operativo y Editores
+# =============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

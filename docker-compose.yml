@@ -1,0 +1,174 @@
+version: '3.8'
+
+# =============================================================================
+# ARQUITECTURA DE MICROSERVICIOS DESACOPLADOS - AGENTE IA DSPACE-CRIS V3.0
+# Sección 2.1, 2.2, 2.3 y 2.4 de la Especificación Técnica
+# =============================================================================
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  dspace_credentials:
+    file: ./secrets/dspace_credentials.txt
+
+networks:
+  agente_network:
+    driver: bridge
+
+volumes:
+  pgdata:
+  ollama_data:
+  rabbitmq_data:
+
+services:
+  # ---------------------------------------------------------------------------
+  # INFRAESTRUCTURA BASE (PostgreSQL, RabbitMQ, Ollama)
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: agente_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: agente_ia
+      POSTGRES_USER: agente_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - agente_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agente_user -d agente_ia"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: agente_rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # Management Dashboard
+    networks:
+      - agente_network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: agente_ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - agente_network
+
+  # ---------------------------------------------------------------------------
+  # MS1: Recuperación de Metadatos (Puerto 8001)
+  # Dueño de: Candidate_Match, External_API_Source
+  # ---------------------------------------------------------------------------
+  ms1-retrieval:
+    build:
+      context: .
+      dockerfile: services/ms1_retrieval/Dockerfile
+    container_name: agente_ms1_retrieval
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://agente_user:postgres@postgres:5432/agente_ia
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672//
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - agente_network
+
+  # ---------------------------------------------------------------------------
+  # MS2: Clasificación Área OCDE / ODS (Puerto 8002)
+  # Dueño de: LLM_Classification_Log, Category
+  # ---------------------------------------------------------------------------
+  ms2-classification:
+    build:
+      context: .
+      dockerfile: services/ms2_classification/Dockerfile
+    container_name: agente_ms2_classification
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://agente_user:postgres@postgres:5432/agente_ia
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672//
+      OLLAMA_BASE_URL: http://ollama:11434
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - agente_network
+
+  # ---------------------------------------------------------------------------
+  # MS3: Gestión de Usuarios, RBAC y Auditoría Inmutable (Puerto 8003)
+  # Dueño de: User, Role, Audit_Log
+  # ---------------------------------------------------------------------------
+  ms3-auth:
+    build:
+      context: .
+      dockerfile: services/ms3_auth/Dockerfile
+    container_name: agente_ms3_auth
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://agente_user:postgres@postgres:5432/agente_ia
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - agente_network
+
+  # ---------------------------------------------------------------------------
+  # MS4: Conexión, Orquestación e Integración DSpace-CRIS (Puerto 8000)
+  # Dueño de: Item_Enrichment, Field_Proposal, Item_Category, Status, Job, DSpace_Sync_Log
+  # ---------------------------------------------------------------------------
+  ms4-orchestrator:
+    build:
+      context: .
+      dockerfile: services/ms4_orchestrator/Dockerfile
+    container_name: agente_ms4_orchestrator
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://agente_user:postgres@postgres:5432/agente_ia
+      MS1_RETRIEVAL_URL: http://ms1-retrieval:8001
+      MS2_CLASSIFICATION_URL: http://ms2-classification:8002
+      MS3_AUTH_URL: http://ms3-auth:8003
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672//
+    ports:
+      - "8000:8000"
+    secrets:
+      - dspace_credentials
+    depends_on:
+      - ms1-retrieval
+      - ms2-classification
+      - ms3-auth
+    networks:
+      - agente_network
