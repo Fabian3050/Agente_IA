@@ -11,8 +11,8 @@ class DSpaceAuthClient:
     Cliente para interactuar con la API REST de DSpace.
     Maneja la autenticación y peticiones base.
     """
-    def __init__(self, base_url: str = settings.dspace_api_url):
-        self.base_url = base_url.rstrip('/')
+    def __init__(self, base_url: Optional[str] = None):
+        self.base_url = (base_url or settings.dspace_api_url).rstrip('/')
         self.email = settings.dspace_username
         self.password = settings.dspace_password
         
