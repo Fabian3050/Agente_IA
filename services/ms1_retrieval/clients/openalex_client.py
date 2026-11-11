@@ -2,8 +2,8 @@ from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 import httpx
-from app.models.metadata_model import MetadataResponse
-from app.clients.unpaywall_client import _normalize_oa_status, _normalize_version_type
+from models.metadata_model import MetadataResponse
+from clients.unpaywall_client import _normalize_oa_status, _normalize_version_type
 
 
 class OpenAlexClient:

@@ -14,6 +14,7 @@ from common.database import Base
 
 class Role(Base):
     __tablename__ = "role"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     name = Column(String(50), unique=True, nullable=False)       # 'Academico', 'Curador_VRIIC', 'Admin'
@@ -24,6 +25,7 @@ class Role(Base):
 
 class User(Base):
     __tablename__ = "user"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     id_role = Column(Uuid, ForeignKey("role.id"), nullable=False, index=True)
@@ -44,6 +46,7 @@ class AuditLog(Base):
     Se revoca UPDATE y DELETE para garantizar inmutabilidad.
     """
     __tablename__ = "audit_log"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     id_user = Column(Uuid, ForeignKey("user.id"), nullable=False, index=True)

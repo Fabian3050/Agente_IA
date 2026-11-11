@@ -1,12 +1,8 @@
 from typing import List, Optional
-try:
-    from models.item_model import Item
-except ImportError:
-    from app.models.item_model import Item
+from models.item_model import Item
 
 class ItemRepository:
     def __init__(self):
-        # En una app real esto sería una conexión a base de datos
         self.items_db = {}
         self.current_id = 1
 

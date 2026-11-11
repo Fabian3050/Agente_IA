@@ -1,7 +1,4 @@
-try:
-    from clients.dspace_auth_client import DSpaceAuthClient
-except ImportError:
-    from app.clients.dspace_auth_client import DSpaceAuthClient
+from clients.dspace_auth_client import DSpaceAuthClient
 import asyncio
 
 class DSpaceService:
@@ -433,7 +430,7 @@ class DSpaceService:
         Persiste el snapshot histórico de métricas en DSpaceMetricsHistory
         y registra los ítems candidatos a enriquecer en DSpaceEnrichmentQueue.
         """
-        from app.models.db_models import DSpaceMetricsHistory, DSpaceEnrichmentQueue
+        from models import DSpaceMetricsHistory, DSpaceEnrichmentQueue
 
         # 1. Guardar Snapshot histórico
         snapshot = DSpaceMetricsHistory(

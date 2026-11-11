@@ -2,8 +2,13 @@ import sys
 import os
 import uuid
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if CURRENT_DIR not in sys.path:
+    sys.path.insert(0, CURRENT_DIR)
+
+COMMON_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "..", "common"))
+if os.path.exists(COMMON_DIR) and COMMON_DIR not in sys.path:
+    sys.path.insert(0, os.path.abspath(os.path.join(CURRENT_DIR, "..")))
 
 from fastapi import FastAPI, Depends, HTTPException, Query
 from sqlalchemy.orm import Session

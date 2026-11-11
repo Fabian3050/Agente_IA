@@ -5,20 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-try:
-    from common.database import get_db
-    from models import (
-        ItemEnrichment, Status, ProposalStatus, FieldProposal, ItemCategory,
-        Job, DSpaceSyncLog
-    )
-    from services.orchestrator_service import MS4Orchestrator as DSpaceOrchestratorServiceMS4
-except ImportError:
-    from app.database import get_db
-    from app.models.db_models import (
-        ItemEnrichment, Status, ProposalStatus, FieldProposal, ItemCategory,
-        CandidateMatch, LLMClassificationLog, Job, DSpaceSyncLog, User, AuditLog
-    )
-    from app.services.dspace_orchestrator_service import DSpaceOrchestratorServiceMS4
+from common.database import get_db
+from models import (
+    ItemEnrichment, Status, ProposalStatus, FieldProposal, ItemCategory,
+    Job, DSpaceSyncLog
+)
+from services.orchestrator_service import MS4Orchestrator as DSpaceOrchestratorServiceMS4
 
 router = APIRouter(
     prefix="/v3/proposals",

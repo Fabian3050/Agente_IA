@@ -1,6 +1,11 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
-from app.models.metadata_model import MetadataResponse
+from typing import Optional, List, Dict, Any
+
+class MetadataItemDTO(BaseModel):
+    title: Optional[str] = None
+    abstract: Optional[str] = None
+    keywords: Optional[List[str]] = None
+    doi: Optional[str] = None
 
 # ---------------------------------------------------------------------------
 # MODELOS PYDANTIC PARA CLASIFICACIÓN FORD OCDE (MS2)
@@ -29,7 +34,7 @@ class OCDEClassificationResponse(BaseModel):
     clasificaciones: List[OCDEClassificationItem] = Field(default_factory=list, max_length=2)
     is_info_sufficient: bool = True
     razonamiento_global: Optional[str] = None
-    articulo: Optional[MetadataResponse] = None
+    articulo: Optional[Any] = None
 
 
 # ---------------------------------------------------------------------------
@@ -55,4 +60,4 @@ class ODSClassificationResponse(BaseModel):
     clasificaciones: List[ODSClassificationItem] = Field(default_factory=list, max_length=2)
     is_info_sufficient: bool = True
     razonamiento_global: Optional[str] = None
-    articulo: Optional[MetadataResponse] = None
+    articulo: Optional[Any] = None

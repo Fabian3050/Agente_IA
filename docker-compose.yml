@@ -1,5 +1,3 @@
-version: '3.8'
-
 # =============================================================================
 # ARQUITECTURA DE MICROSERVICIOS DESACOPLADOS - AGENTE IA DSPACE-CRIS V3.0
 # Sección 2.1, 2.2, 2.3 y 2.4 de la Especificación Técnica
@@ -37,11 +35,11 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5433:5432"
     networks:
       - agente_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agente_user -d agente_ia"]
+      test: [ "CMD-SHELL", "pg_isready -U agente_user -d agente_ia" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -56,12 +54,12 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     ports:
-      - "5672:5672"     # AMQP
-      - "15672:15672"   # Management Dashboard
+      - "5672:5672" # AMQP
+      - "15672:15672" # Management Dashboard
     networks:
       - agente_network
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      test: [ "CMD", "rabbitmq-diagnostics", "check_running" ]
       interval: 10s
       timeout: 5s
       retries: 5

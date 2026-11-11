@@ -6,6 +6,7 @@ from sqlalchemy.orm import relationship
 from pydantic import BaseModel, Field
 
 from common.database import Base
+from models.metadata_model import MetadataResponse
 
 
 # =============================================================================
@@ -14,6 +15,7 @@ from common.database import Base
 
 class ExternalAPISource(Base):
     __tablename__ = "external_api_source"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), unique=True, nullable=False)
@@ -25,13 +27,14 @@ class ExternalAPISource(Base):
 
 class CandidateMatch(Base):
     __tablename__ = "candidate_match"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     id_item_enrichment = Column(Uuid, nullable=False, index=True)
     id_external_source = Column(Integer, ForeignKey("external_api_source.id"), nullable=False, index=True)
     candidate_doi = Column(String(150), nullable=True)
     match_score = Column(Float, nullable=True)
-    query_result = Column(String(50), nullable=False)  # 'exitosa', 'sin_datos', 'fallida', 'timeout'
+    query_result = Column(String(50), nullable=False)
     raw_metadata_json = Column(JSON, nullable=True)
     retrieved_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -71,7 +74,7 @@ class CandidateMetadataDTO(BaseModel):
 
 
 class RetrievalResponse(BaseModel):
-    outcome: str  # 'ALTA_COINCIDENCIA', 'COINCIDENCIA_DUDOSA', 'SIN_DATOS', 'DESCARTADA'
+    outcome: str
     max_score: float
     best_source: Optional[str] = None
     consolidated: Dict[str, Any]

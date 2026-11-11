@@ -1,6 +1,6 @@
 import httpx
 from typing import List, Optional
-from app.models.metadata_model import MetadataResponse
+from models.metadata_model import MetadataResponse
 
 UNPAYWALL_EMAIL = "agente_ia_vriic@usach.cl"
 

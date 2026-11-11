@@ -1,20 +1,13 @@
 from fastapi import APIRouter, HTTPException, Depends
-try:
-    from models.item_model import Item
-    from services.item_service import ItemService
-    from repositories.item_repository import ItemRepository
-except ImportError:
-    from app.models.item_model import Item
-    from app.services.item_service import ItemService
-    from app.repositories.item_repository import ItemRepository
+from models.item_model import Item
+from services.item_service import ItemService
+from repositories.item_repository import ItemRepository
 
 router = APIRouter(
     prefix="/items",
     tags=["items"]
 )
 
-# En una aplicación real usaríamos Dependency Injection avanzado o el framework de inyección de FastAPI.
-# Para simplicidad, instanciamos aquí un repositorio global.
 repository = ItemRepository()
 service = ItemService(repository)
 
@@ -30,7 +23,6 @@ def read_item(item_id: int, q: str | None = None, svc: ItemService = Depends(get
     item = svc.get_item_by_id(item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    # Agregamos 'q' a la respuesta para mantener la funcionalidad original de ejemplo
     return {"item": item, "q": q}
 
 @router.post("/")

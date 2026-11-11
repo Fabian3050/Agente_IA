@@ -6,6 +6,12 @@ from pydantic import BaseModel, Field
 
 from common.database import Base
 
+from models.classification_model import (
+    OCDEClassificationItem, OCDEClassificationResult, OCDEClassificationResponse,
+    ODSClassificationItem, ODSClassificationResult, ODSClassificationResponse
+)
+from models.ollama_model import OllamaGenerateRequest, OllamaGenerateResponse
+
 
 # =============================================================================
 # MODELOS SQLALCHEMY PROPIETARIOS DE MS2
@@ -13,6 +19,7 @@ from common.database import Base
 
 class Category(Base):
     __tablename__ = "category"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     code = Column(String(50), nullable=False, index=True)        # ej. 1.1, ODS 7
@@ -24,6 +31,7 @@ class Category(Base):
 
 class LLMClassificationLog(Base):
     __tablename__ = "llm_classification_log"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     id_item_enrichment = Column(Uuid, nullable=False, index=True)

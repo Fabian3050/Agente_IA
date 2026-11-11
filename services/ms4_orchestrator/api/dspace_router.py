@@ -1,12 +1,8 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
-try:
-    from services.dspace_service import DSpaceService
-    from common.database import get_db
-except ImportError:
-    from app.services.dspace_service import DSpaceService
-    from app.database import get_db
+from services.dspace_service import DSpaceService
+from common.database import get_db
 
 router = APIRouter(
     prefix="/dspace",
@@ -68,7 +64,7 @@ def get_metrics_history(
     """
     Retorna el histórico cronológico de métricas del repositorio para alimentar dashboards.
     """
-    from app.models.db_models import DSpaceMetricsHistory
+    from models import DSpaceMetricsHistory
     records = db.query(DSpaceMetricsHistory).order_by(DSpaceMetricsHistory.fecha.desc()).limit(limit).all()
     return records
 
@@ -83,7 +79,7 @@ def get_enrichment_queue(
     """
     Retorna publicaciones en la cola de enriquecimiento con filtros y paginación para el dashboard.
     """
-    from app.models.db_models import DSpaceEnrichmentQueue
+    from models import DSpaceEnrichmentQueue
     query = db.query(DSpaceEnrichmentQueue)
     if estado:
         query = query.filter(DSpaceEnrichmentQueue.estado == estado)
@@ -106,7 +102,7 @@ def get_enrichment_queue_stats(
     """
     Retorna estadísticas agregadas de la cola de enriquecimiento agrupadas por estado para los KPIs del Dashboard.
     """
-    from app.models.db_models import DSpaceEnrichmentQueue
+    from models import DSpaceEnrichmentQueue
     from sqlalchemy import func
     stats = db.query(DSpaceEnrichmentQueue.estado, func.count(DSpaceEnrichmentQueue.id)).group_by(DSpaceEnrichmentQueue.estado).all()
     total = db.query(func.count(DSpaceEnrichmentQueue.id)).scalar() or 0
@@ -126,7 +122,7 @@ async def enrich_item(
     Recupera abstract, keywords, financiamiento y derechos desde fuentes académicas,
     y opcionalmente clasifica en áreas OCDE y ODS usando el LLM (Ollama).
     """
-    from app.services.enrichment_service import EnrichmentService
+    from services.enrichment_service import EnrichmentService
     service = EnrichmentService()
     resultado = await service.enrich_item_by_id(item_id, db, classify_with_ai=classify_with_ai)
     if not resultado:
@@ -142,7 +138,7 @@ async def enrich_item_by_uuid(
     """
     Enriquece un ítem individual de la cola por su UUID de DSpace.
     """
-    from app.services.enrichment_service import EnrichmentService
+    from services.enrichment_service import EnrichmentService
     service = EnrichmentService()
     resultado = await service.enrich_item_by_uuid(dspace_uuid, db, classify_with_ai=classify_with_ai)
     if not resultado:
@@ -159,7 +155,7 @@ async def enrich_next_batch(
     Toma los siguientes N registros en estado PENDIENTE de la cola y ejecuta el pipeline de enriquecimiento.
     Ideal para procesar y probar en lotes controlados (1, 5, 10 ítems).
     """
-    from app.services.enrichment_service import EnrichmentService
+    from services.enrichment_service import EnrichmentService
     service = EnrichmentService()
     return await service.enrich_batch(limit=limit, estado_filtro="PENDIENTE", classify_with_ai=classify_with_ai, db=db)
 
@@ -176,7 +172,7 @@ async def generate_vriic_sample(
     Guarda las clasificaciones en la base de datos y exporta el archivo Excel en la raíz del proyecto para validación con la VRIIC.
     Si force_reclassify=True, vuelve a ejecutar el LLM en todos los ítems de la muestra.
     """
-    from app.services.enrichment_service import EnrichmentService
+    from services.enrichment_service import EnrichmentService
     service = EnrichmentService()
     try:
         return await service.generate_vriic_sample(
@@ -199,7 +195,7 @@ def reset_classifications(
     Elimina las clasificaciones realizadas (OCDE y ODS) en 'dspace_enrichment_queue' 
     y restablece su estado a PENDIENTE o ENRIQUECIDO_FUENTES para poder volver a clasificarlas.
     """
-    from app.services.enrichment_service import EnrichmentService
+    from services.enrichment_service import EnrichmentService
     service = EnrichmentService()
     return service.reset_classifications(db=db, item_id=item_id, dspace_uuid=dspace_uuid, reset_all=reset_all)
 
