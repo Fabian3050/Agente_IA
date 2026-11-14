@@ -1,5 +1,8 @@
 import sys
 import os
+import uuid
+import asyncio
+import logging
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
@@ -13,11 +16,14 @@ if os.path.exists(COMMON_DIR) and COMMON_DIR not in sys.path:
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from common.database import get_db, Base, engine
+from common.database import get_db, Base, engine, SessionLocal
+from common.messaging import publish_event, start_background_consumer
 from models import RetrievalRequest, RetrievalResponse, ExternalAPISource
 from services.retrieval_service import MS1RetrievalWorker
 from api.metadata_router import router as metadata_router
 from api.unpaywall_router import router as unpaywall_router
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="MS1: Recuperación de Metadatos",
@@ -32,9 +38,52 @@ app.include_router(metadata_router)
 app.include_router(unpaywall_router)
 
 
+def process_rabbitmq_request(payload: dict):
+    """Callback de RabbitMQ para procesar solicitudes asíncronas de recuperación desde MS4."""
+    item_id_raw = payload.get("item_id")
+    if not item_id_raw:
+        return
+    item_id = uuid.UUID(item_id_raw) if isinstance(item_id_raw, str) else item_id_raw
+    doi = payload.get("doi")
+    title = payload.get("title")
+    reply_queue = payload.get("reply_queue", "dspace.retrieval.responses")
+
+    db = SessionLocal()
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        res = loop.run_until_complete(
+            worker.execute_retrieval(item_id=item_id, doi=doi, title=title, db=db)
+        )
+        loop.close()
+
+        publish_event(reply_queue, {
+            "item_id": str(item_id),
+            "outcome": res.get("outcome"),
+            "max_score": res.get("max_score"),
+            "best_source": res.get("best_source"),
+            "consolidated": res.get("consolidated"),
+            "query_statuses": res.get("query_statuses")
+        })
+    except Exception as e:
+        logger.error(f"[MS1] Error procesando RabbitMQ request para ítem {item_id}: {e}")
+        publish_event(reply_queue, {
+            "item_id": str(item_id),
+            "outcome": "ERROR",
+            "error": str(e)
+        })
+    finally:
+        db.close()
+
+
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
+    try:
+        start_background_consumer("dspace.retrieval.requests", process_rabbitmq_request)
+        logger.info("[MS1] Consumidor de RabbitMQ iniciado para 'dspace.retrieval.requests'.")
+    except Exception as e:
+        logger.warning(f"[MS1] Advertencia al iniciar consumidor de RabbitMQ: {e}")
 
 
 @app.get("/health")

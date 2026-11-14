@@ -64,9 +64,17 @@ class MS3Client:
             return resp.json()
 
     async def verify_role(self, user_id: uuid.UUID, required_role: str) -> bool:
-        url = f"{MS3_URL.rstrip('/')}/verify-role"
+        url = f"{MS3_URL.rstrip('/')}/auth/verify-role"
         params = {"user_id": str(user_id), "required_role": required_role}
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(url, params=params)
             return resp.status_code == 200
+
+    async def introspect_token(self, token: str) -> Dict[str, Any]:
+        url = f"{MS3_URL.rstrip('/')}/auth/introspect"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, json={"token": token})
+            if resp.status_code == 200:
+                return resp.json()
+            return {"active": False}
 

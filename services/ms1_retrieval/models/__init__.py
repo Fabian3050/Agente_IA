@@ -5,8 +5,15 @@ from sqlalchemy import Column, Integer, String, Float, Boolean, JSON, DateTime, 
 from sqlalchemy.orm import relationship
 from pydantic import BaseModel, Field
 
-from common.database import Base
-from models.metadata_model import MetadataResponse
+try:
+    from common.database import Base
+except ImportError:
+    from services.common.database import Base
+
+try:
+    from models.metadata_model import MetadataResponse
+except ImportError:
+    from services.ms1_retrieval.models.metadata_model import MetadataResponse
 
 
 # =============================================================================

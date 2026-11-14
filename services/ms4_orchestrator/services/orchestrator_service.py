@@ -1,23 +1,42 @@
 import csv
 import io
 import uuid
+import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple, Callable
 from collections import defaultdict
 from sqlalchemy.orm import Session
 
-from models import (
-    ItemEnrichment, Status, ProposalStatus,
-    FieldProposal, ItemCategory,
-    Job, DSpaceSyncLog
-)
-from clients.ms_clients import MS1Client, MS2Client, MS3Client
+try:
+    from models import (
+        ItemEnrichment, Status, ProposalStatus,
+        FieldProposal, ItemCategory,
+        Job, DSpaceSyncLog
+    )
+except ImportError:
+    from services.ms4_orchestrator.models import (
+        ItemEnrichment, Status, ProposalStatus,
+        FieldProposal, ItemCategory,
+        Job, DSpaceSyncLog
+    )
+
+try:
+    from clients.ms_clients import MS1Client, MS2Client, MS3Client
+except ImportError:
+    from services.ms4_orchestrator.clients.ms_clients import MS1Client, MS2Client, MS3Client
+
+try:
+    from common.messaging import publish_event
+except ImportError:
+    from services.common.messaging import publish_event
+
+logger = logging.getLogger(__name__)
 
 
 class MS4Orchestrator:
     """
     Microservicio 4: Orquestación del ciclo de vida (12 estados),
-    idempotencia temprana, proveniencia atómica, concurrencia y exportación CSV segura.
+    idempotencia temprana, proveniencia atómica, concurrencia y exportación CSV segura en 2 pasos.
     Escribe exclusivamente en Item_Enrichment, Field_Proposal, Item_Category, Status, Job y DSpace_Sync_Log.
     """
 
@@ -35,6 +54,9 @@ class MS4Orchestrator:
             db.refresh(st)
         return st
 
+    # -------------------------------------------------------------------------
+    # 1. IDEMPOTENCIA TEMPRANA Y DETECCIÓN
+    # -------------------------------------------------------------------------
     def handle_detection(
         self,
         db: Session,
@@ -90,6 +112,121 @@ class MS4Orchestrator:
         db.commit()
         return new_item, "CREADA_Y_EN_RECUPERACION"
 
+    # Alias para compatibilidad
+    handle_detected_item = handle_detection
+
+    # -------------------------------------------------------------------------
+    # 2. COMUNICACIÓN ASÍNCRONA VIA RABBITMQ (MS4 -> MS1)
+    # -------------------------------------------------------------------------
+    def dispatch_retrieval_async(self, db: Session, item: ItemEnrichment) -> bool:
+        """
+        Publica una solicitud de recuperación a RabbitMQ ('dspace.retrieval.requests').
+        Transita el ítem a En_recuperacion y registra el Job en progreso.
+        """
+        item.status = self.get_status_by_name(db, ProposalStatus.EN_RECUPERACION)
+        job = Job(id_item_enrichment=item.id, stage="Recuperacion", status="En_Progreso")
+        db.add(job)
+        db.commit()
+
+        payload = {
+            "item_id": str(item.id),
+            "uuid_dspace": item.uuid_dspace,
+            "doi": item.doi,
+            "title": item.title,
+            "reply_queue": "dspace.retrieval.responses"
+        }
+        published = publish_event("dspace.retrieval.requests", payload)
+        if not published:
+            logger.warning(f"No se pudo despachar por RabbitMQ para item {item.id}, fallback a sincrono.")
+        return published
+
+    def handle_retrieval_response(self, db: Session, payload: Dict[str, Any]) -> None:
+        """
+        Procesa la respuesta asíncrona de MS1 recibida desde RabbitMQ ('dspace.retrieval.responses').
+        Actualiza el ítem, crea FieldProposals y transita a En_clasificacion o En_revision/En_reintento.
+        """
+        item_id_raw = payload.get("item_id")
+        if not item_id_raw:
+            return
+
+        item_id = uuid.UUID(item_id_raw) if isinstance(item_id_raw, str) else item_id_raw
+        item = db.query(ItemEnrichment).filter(ItemEnrichment.id == item_id).first()
+        if not item:
+            logger.warning(f"[MS4] Ítem {item_id} no encontrado para respuesta de recuperación.")
+            return
+
+        job = db.query(Job).filter(
+            Job.id_item_enrichment == item.id,
+            Job.stage == "Recuperacion"
+        ).order_by(Job.created_at.desc()).first()
+
+        outcome = payload.get("outcome")
+        consolidated = payload.get("consolidated") or {}
+
+        if outcome == "COINCIDENCIA_DUDOSA":
+            item.status = self.get_status_by_name(db, ProposalStatus.COINCIDENCIA_DUDOSA)
+            if job:
+                job.status = "Completado"
+                job.last_error = "Coincidencia dudosa: derivar a curador"
+            db.commit()
+            item.status = self.get_status_by_name(db, ProposalStatus.EN_REVISION)
+            db.commit()
+            return
+
+        if outcome in ["DESCARTADA", "SIN_DATOS", "ERROR"]:
+            if job:
+                job.status = "Fallido"
+                job.retry_count += 1
+                job.last_error = payload.get("error", f"Resultado {outcome}")
+            if job and job.retry_count < 3:
+                item.status = self.get_status_by_name(db, ProposalStatus.EN_REINTENTO)
+            else:
+                item.status = self.get_status_by_name(db, ProposalStatus.EN_REVISION)
+            db.commit()
+            return
+
+        # Consolidación exitosa
+        self._apply_consolidated_metadata(db, item, consolidated)
+        if job:
+            job.status = "Completado"
+        item.status = self.get_status_by_name(db, ProposalStatus.EN_CLASIFICACION)
+        db.commit()
+
+    def _apply_consolidated_metadata(self, db: Session, item: ItemEnrichment, consolidated: Dict[str, Any]):
+        if consolidated.get("doi"): item.doi = consolidated["doi"]
+        if consolidated.get("abstract"): item.abstract = consolidated["abstract"]
+        if consolidated.get("author_keywords"): item.author_keywords = consolidated["author_keywords"]
+        if consolidated.get("automated_concepts"): item.automated_concepts = consolidated["automated_concepts"]
+        if consolidated.get("funding_agency"): item.funding_agency = consolidated["funding_agency"]
+        if consolidated.get("funding_id"): item.funding_id = consolidated["funding_id"]
+        if consolidated.get("funding_grant_number"): item.funding_grant_number = consolidated["funding_grant_number"]
+        if consolidated.get("oa_status"): item.oa_status = consolidated["oa_status"]
+        if consolidated.get("license"): item.license = consolidated["license"]
+        if consolidated.get("version_type"): item.version_type = consolidated["version_type"]
+
+        fields_to_save = [
+            ("dc.description.abstract", consolidated.get("abstract"), consolidated.get("abstract_source"), "prioridad_abstract"),
+            ("dc.subject", consolidated.get("author_keywords"), "Fuentes combinadas", "palabras_clave_autor"),
+            ("cris.concept", consolidated.get("automated_concepts"), "OpenAlex", "conceptos_algoritmicos"),
+            ("funding_agency", consolidated.get("funding_agency"), "Crossref/OpenAlex", "desglose_financiamiento"),
+            ("oa_status", consolidated.get("oa_status"), "Unpaywall", "open_access_estandar"),
+            ("version_type", consolidated.get("version_type"), "OpenAlex/Unpaywall", "version_manuscrito")
+        ]
+        for f_name, val, src, rule in fields_to_save:
+            if val:
+                db.add(FieldProposal(
+                    id_item_enrichment=item.id,
+                    field_name=f_name,
+                    proposed_value=str(val),
+                    source=src,
+                    rule_applied=rule,
+                    final_value=str(val)
+                ))
+        db.commit()
+
+    # -------------------------------------------------------------------------
+    # 3. PIPELINE COMPLETO SINCRONO / ORQUESTADO
+    # -------------------------------------------------------------------------
     async def run_pipeline_for_item(self, db: Session, item: ItemEnrichment) -> Dict[str, Any]:
         """Coordina la ejecución de MS1 y MS2 para una publicación."""
         job = Job(id_item_enrichment=item.id, stage="Recuperacion", status="En_Progreso")
@@ -117,38 +254,7 @@ class MS4Orchestrator:
                 db.commit()
                 return {"status": outcome}
 
-            # Guardar metadatos consolidados
-            if consolidated.get("doi"): item.doi = consolidated["doi"]
-            if consolidated.get("abstract"): item.abstract = consolidated["abstract"]
-            if consolidated.get("author_keywords"): item.author_keywords = consolidated["author_keywords"]
-            if consolidated.get("automated_concepts"): item.automated_concepts = consolidated["automated_concepts"]
-            if consolidated.get("funding_agency"): item.funding_agency = consolidated["funding_agency"]
-            if consolidated.get("funding_id"): item.funding_id = consolidated["funding_id"]
-            if consolidated.get("funding_grant_number"): item.funding_grant_number = consolidated["funding_grant_number"]
-            if consolidated.get("oa_status"): item.oa_status = consolidated["oa_status"]
-            if consolidated.get("license"): item.license = consolidated["license"]
-            if consolidated.get("version_type"): item.version_type = consolidated["version_type"]
-
-            # Guardar proveniencia atómica en FieldProposal
-            fields_to_save = [
-                ("dc.description.abstract", consolidated.get("abstract"), consolidated.get("abstract_source"), "prioridad_abstract"),
-                ("dc.subject", consolidated.get("author_keywords"), "Fuentes combinadas", "palabras_clave_autor"),
-                ("cris.concept", consolidated.get("automated_concepts"), "OpenAlex", "conceptos_algoritmicos"),
-                ("funding_agency", consolidated.get("funding_agency"), "Crossref/OpenAlex", "desglose_financiamiento"),
-                ("oa_status", consolidated.get("oa_status"), "Unpaywall", "open_access_estandar"),
-                ("version_type", consolidated.get("version_type"), "OpenAlex/Unpaywall", "version_manuscrito")
-            ]
-            for f_name, val, src, rule in fields_to_save:
-                if val:
-                    db.add(FieldProposal(
-                        id_item_enrichment=item.id,
-                        field_name=f_name,
-                        proposed_value=str(val),
-                        source=src,
-                        rule_applied=rule,
-                        final_value=str(val)
-                    ))
-
+            self._apply_consolidated_metadata(db, item, consolidated)
             job.status = "Completado"
             item.status = self.get_status_by_name(db, ProposalStatus.EN_CLASIFICACION)
             db.commit()
@@ -177,7 +283,7 @@ class MS4Orchestrator:
             for idx, c in enumerate(res_ms2.get("ocde_categories", [])[:2], start=1):
                 db.add(ItemCategory(
                     id_item_enrichment=item.id,
-                    id_category=1, # Ref id Category
+                    id_category=1,
                     origin="LLM",
                     priority_order=idx,
                     confidence_score=c.get("confidence_score", 0.95)
@@ -204,6 +310,9 @@ class MS4Orchestrator:
             db.commit()
             return {"status": "ERROR_MS2", "error": str(e)}
 
+    # -------------------------------------------------------------------------
+    # 4. CURADURÍA HUMANA Y REVALIDACIÓN DE CONCURRENCIA
+    # -------------------------------------------------------------------------
     async def apply_curation(
         self,
         db: Session,
@@ -214,7 +323,7 @@ class MS4Orchestrator:
         rejection_reason: Optional[str] = None,
         dspace_live_last_modified: Optional[datetime] = None
     ) -> Dict[str, Any]:
-        # Revalidar concurrencia
+        # Revalidar concurrencia: ¿Cambió en DSpace?
         if dspace_live_last_modified and item.last_modified_dspace:
             if dspace_live_last_modified != item.last_modified_dspace:
                 item.status = self.get_status_by_name(db, ProposalStatus.INVALIDADA)
@@ -266,16 +375,55 @@ class MS4Orchestrator:
         db.commit()
         return {"result": "APROBADA"}
 
-    def export_csv_zero_empty_cells(self, db: Session) -> List[Dict[str, Any]]:
+    # Alias para compatibilidad
+    apply_curator_decision = apply_curation
+
+    # -------------------------------------------------------------------------
+    # 5. EXPORTACIÓN CSV EN DOS PASOS Y AGRUPACIÓN POR SUBCONJUNTO (CERO CELDAS VACÍAS)
+    # -------------------------------------------------------------------------
+    def export_csv_zero_empty_cells(
+        self,
+        db: Session,
+        dspace_live_checker: Optional[Callable[[str], Optional[datetime]]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Exportación en 2 pasos:
+        Paso 1: Revalida la fecha de modificación (last_modified_dspace) con DSpace-CRIS en vivo.
+                Si difiere, transita a 'Invalidada' y se excluye del lote.
+        Paso 2: Agrupa las propuestas válidas en archivos CSV independientes por subconjunto exacto
+                de columnas con valor, garantizando CERO celdas vacías para no borrar metadatos existentes.
+        Transita las exportadas a 'Exportada' y registra DSpaceSyncLog.
+        """
         st_aprobada = self.get_status_by_name(db, ProposalStatus.APROBADA)
         st_exportada = self.get_status_by_name(db, ProposalStatus.EXPORTADA)
+        st_invalidada = self.get_status_by_name(db, ProposalStatus.INVALIDADA)
 
         items = db.query(ItemEnrichment).filter(ItemEnrichment.id_status == st_aprobada.id).all()
         if not items:
             return []
 
-        batches = defaultdict(list)
+        # Paso 1: Revalidación en vivo
+        valid_items: List[ItemEnrichment] = []
         for it in items:
+            if dspace_live_checker:
+                live_modified = dspace_live_checker(it.uuid_dspace)
+                if live_modified and it.last_modified_dspace and live_modified != it.last_modified_dspace:
+                    it.status = st_invalidada
+                    db.add(DSpaceSyncLog(
+                        id_item_enrichment=it.id,
+                        sync_type="Invalidated_External_Change",
+                        http_status_code=409
+                    ))
+                    db.commit()
+                    continue
+            valid_items.append(it)
+
+        if not valid_items:
+            return []
+
+        # Paso 2: Agrupación por subconjunto exacto de columnas para garantizar CERO celdas vacías
+        batches = defaultdict(list)
+        for it in valid_items:
             row = {"id": it.uuid_dspace}
             if it.abstract and it.abstract.strip(): row["dc.description.abstract"] = it.abstract.strip()
             if it.author_keywords and it.author_keywords.strip(): row["dc.subject"] = it.author_keywords.strip()
@@ -293,7 +441,8 @@ class MS4Orchestrator:
             writer.writeheader()
 
             for it, row in item_rows:
-                assert all(row.get(c) for c in cols)
+                # Verificación estricta de CERO celdas vacías
+                assert all(row.get(c) for c in cols), f"Error de gobierno: Celda vacía detectada en lote para ítem {it.uuid_dspace}"
                 writer.writerow(row)
                 it.status = st_exportada
                 db.add(DSpaceSyncLog(id_item_enrichment=it.id, sync_type="Export_CSV", http_status_code=200))
@@ -307,3 +456,46 @@ class MS4Orchestrator:
 
         return out_batches
 
+    # Alias para compatibilidad
+    export_approved_proposals_csv = export_csv_zero_empty_cells
+
+    # -------------------------------------------------------------------------
+    # 6. ESTADOS FINALES: CARGADA Y CERRADA
+    # -------------------------------------------------------------------------
+    def mark_as_loaded(self, db: Session, item_id: uuid.UUID, http_status_code: int = 200) -> Dict[str, Any]:
+        """
+        Transita una propuesta desde 'Exportada' a 'Cargada' tras confirmarse
+        la importación masiva o sincronización REST exitosa en DSpace-CRIS.
+        """
+        item = db.query(ItemEnrichment).filter(ItemEnrichment.id == item_id).first()
+        if not item:
+            return {"error": "Item no encontrado"}
+
+        st_cargada = self.get_status_by_name(db, ProposalStatus.CARGADA)
+        item.status = st_cargada
+        db.add(DSpaceSyncLog(
+            id_item_enrichment=item.id,
+            sync_type="DSpace_Import_Verified",
+            http_status_code=http_status_code
+        ))
+        db.commit()
+        return {"result": "CARGADA", "item_id": str(item.id)}
+
+    def mark_as_closed(self, db: Session, item_id: uuid.UUID) -> Dict[str, Any]:
+        """
+        Transita una propuesta desde 'Cargada' a 'Cerrada' completando
+        el ciclo de vida formal de gobierno del dato.
+        """
+        item = db.query(ItemEnrichment).filter(ItemEnrichment.id == item_id).first()
+        if not item:
+            return {"error": "Item no encontrado"}
+
+        st_cerrada = self.get_status_by_name(db, ProposalStatus.CERRADA)
+        item.status = st_cerrada
+        db.add(DSpaceSyncLog(
+            id_item_enrichment=item.id,
+            sync_type="Cycle_Closed",
+            http_status_code=200
+        ))
+        db.commit()
+        return {"result": "CERRADA", "item_id": str(item.id)}

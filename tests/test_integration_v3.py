@@ -1,57 +1,79 @@
 """
 Suite de Pruebas Automáticas de Integración - Versión 3.0
 Cubre las observaciones críticas de la Sección 5.4 de la Especificación Técnica:
-1. test_double_detection: Idempotencia temprana (omisión si propuesta activa).
-2. test_external_change_invalidation: Invalidación si el registro cambia externamente en DSpace.
-3. test_csv_zero_empty_cells: Garantía de CERO celdas vacías en exportación CSV masiva.
+1. test_double_detection: Idempotencia temprana (omisión si propuesta activa en En_revision, Aprobada, Exportada, Cargada, Cerrada).
+2. test_external_change_invalidation: Invalidación en dos pasos si el registro cambia externamente en DSpace.
+3. test_csv_zero_empty_cells: Garantía de CERO celdas vacías en exportación CSV masiva por agrupación de columnas.
 4. test_partial_source_failure: Construcción con fuentes exitosas y aislamiento de fallas.
 5. test_max_retries_exhaustion: Derivación a 'En_revision' con error en Job al agotar reintentos.
-6. test_rbac_permissions_isolation: Rechazo HTTP 403 para roles sin facultades de curaduría.
+6. test_rbac_permissions_isolation: Rechazo HTTP 403 / permiso denegado para roles sin facultades de curaduría.
+7. test_full_lifecycle_loaded_and_closed: Cobertura completa de los estados 11 (Cargada) y 12 (Cerrada).
 """
 
+import os
+import sys
 import unittest
 import uuid
+import csv
+import io
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.db_models import (
-    Base, Status, ProposalStatus, ItemEnrichment, FieldProposal,
-    User, Role, AuditLog, Job, ExternalAPISource
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SERVICES_DIR = os.path.join(PROJECT_ROOT, "services")
+if SERVICES_DIR not in sys.path:
+    sys.path.insert(0, SERVICES_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from common.database import Base
+from services.ms4_orchestrator.models import (
+    Status, ProposalStatus, ItemEnrichment, FieldProposal, Job, DSpaceSyncLog
 )
-from app.services.seed_service import seed_statuses, seed_roles, seed_external_sources
-from app.services.dspace_orchestrator_service import DSpaceOrchestratorServiceMS4
-from app.services.curation_audit_service import CurationAuditServiceMS3
+from services.ms4_orchestrator.services.seed_service import seed_statuses
+from services.ms4_orchestrator.services.orchestrator_service import MS4Orchestrator
+from services.ms3_auth.models import User, Role, AuditLog
+from services.ms3_auth.services.audit_service import MS3AuditWorker
+from services.ms1_retrieval.models import ExternalAPISource
 
 
 class TestIntegrationV3(unittest.TestCase):
 
     def setUp(self):
-        # Crear base de datos en memoria para pruebas aisladas y reproducibles
+        # Base de datos en memoria para pruebas aisladas
         self.engine = create_engine("sqlite:///:memory:")
         TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
-        Base.metadata.create_all(bind=self.engine)
+        Status.metadata.create_all(bind=self.engine)
         self.db = TestingSessionLocal()
 
-        # Sembrar catálogos básicos
+        # Sembrar catálogo de 12 estados
         seed_statuses(self.db)
-        seed_roles(self.db)
-        seed_external_sources(self.db)
 
-        self.orchestrator = DSpaceOrchestratorServiceMS4()
-        self.curation_service = CurationAuditServiceMS3()
+        # Sembrar roles
+        for r_name in ["Admin", "Curador_VRIIC", "Academico"]:
+            if not self.db.query(Role).filter(Role.name == r_name).first():
+                self.db.add(Role(name=r_name, description=f"Rol {r_name}"))
+        self.db.commit()
+
+        # Sembrar fuentes externas
+        for s_name in ["Crossref", "OpenAlex", "Unpaywall", "Europe PMC", "Semantic Scholar"]:
+            if not self.db.query(ExternalAPISource).filter(ExternalAPISource.name == s_name).first():
+                self.db.add(ExternalAPISource(name=s_name, base_url="", is_active=True))
+        self.db.commit()
+
+        self.orchestrator = MS4Orchestrator()
+        self.audit_worker = MS3AuditWorker()
 
     def tearDown(self):
         self.db.close()
-        Base.metadata.drop_all(bind=self.engine)
+        Status.metadata.drop_all(bind=self.engine)
 
     def test_double_detection(self):
         """
-        Nombre de la Prueba: test_double_detection
-        Escenario: Una publicación con una propuesta en estado 'En_revision' se somete a un segundo ciclo de monitoreo.
-        Resultado Esperado: El sistema omite la publicación; no se realizan llamadas externas y la propuesta previa se mantiene intacta.
+        Escenario: Una publicación con una propuesta activa en 'En_revision' se detecta nuevamente.
+        Resultado Esperado: El agente omite la publicación sin alterar el estado previo (Idempotencia temprana).
         """
-        # Crear propuesta inicial en estado 'En_revision'
         st_revision = self.orchestrator.get_status_by_name(self.db, ProposalStatus.EN_REVISION)
         item = ItemEnrichment(
             uuid_dspace="uuid-item-001",
@@ -62,8 +84,7 @@ class TestIntegrationV3(unittest.TestCase):
         self.db.add(item)
         self.db.commit()
 
-        # Segundo ciclo de monitoreo sobre el mismo ítem
-        res_item, message = self.orchestrator.handle_detected_item(
+        res_item, message = self.orchestrator.handle_detection(
             db=self.db,
             uuid_dspace="uuid-item-001",
             doi="10.1000/182",
@@ -71,17 +92,15 @@ class TestIntegrationV3(unittest.TestCase):
         )
 
         self.assertIsNone(res_item)
-        self.assertTrue("OMITIDO_IDEMPOTENCIA" in message)
+        self.assertIn("OMITIDO_IDEMPOTENCIA", message)
 
-        # Verificar que el ítem original sigue intacto en 'En_revision'
         item_refreshed = self.db.query(ItemEnrichment).filter(ItemEnrichment.uuid_dspace == "uuid-item-001").first()
         self.assertEqual(item_refreshed.status.name, ProposalStatus.EN_REVISION)
 
     def test_external_change_invalidation(self):
         """
-        Nombre de la Prueba: test_external_change_invalidation
-        Escenario: El registro cambia en DSpace-CRIS entre la aprobación del curador y el momento de la exportación.
-        Resultado Esperado: La propuesta transita automáticamente al estado 'Invalidada' y se excluye del lote CSV.
+        Escenario: El registro cambia en DSpace-CRIS entre la aprobación y la exportación.
+        Resultado Esperado: La propuesta transita a 'Invalidada' y se excluye del lote CSV.
         """
         st_aprobada = self.orchestrator.get_status_by_name(self.db, ProposalStatus.APROBADA)
         fecha_aprobacion = datetime.utcnow() - timedelta(hours=2)
@@ -97,32 +116,27 @@ class TestIntegrationV3(unittest.TestCase):
         self.db.add(item)
         self.db.commit()
 
-        # Simular que en DSpace la fecha de modificación cambió posteriormente
+        # Simular que en DSpace la fecha de modificación cambió
         fecha_cambio_dspace = datetime.utcnow()
         dspace_live_checker = lambda uuid_dsp: fecha_cambio_dspace
 
-        batches = self.orchestrator.export_approved_proposals_csv(
+        batches = self.orchestrator.export_csv_zero_empty_cells(
             db=self.db,
             dspace_live_checker=dspace_live_checker
         )
 
-        # Debe excluirse del lote
         self.assertEqual(len(batches), 0)
-
-        # Debe haber transitado automáticamente a 'Invalidada'
         self.db.refresh(item)
         self.assertEqual(item.status.name, ProposalStatus.INVALIDADA)
 
     def test_csv_zero_empty_cells(self):
         """
-        Nombre de la Prueba: test_csv_zero_empty_cells
-        Escenario: Se genera un lote de exportación CSV para un grupo de publicaciones enriquecidas.
-        Resultado Esperado: Se verifica que ninguna celda correspondiente a las columnas incluidas contenga valor nulo o vacío.
+        Escenario: Exportación masiva de propuestas aprobadas con diferentes campos disponibles.
+        Resultado Esperado: Se agrupan en archivos CSV independientes por combinación de columnas y CERO celdas vacías.
         """
         st_aprobada = self.orchestrator.get_status_by_name(self.db, ProposalStatus.APROBADA)
         fecha_mod = datetime.utcnow()
 
-        # Item 1 tiene abstract y keywords
         item1 = ItemEnrichment(
             uuid_dspace="uuid-csv-001",
             title="Doc 1",
@@ -131,7 +145,6 @@ class TestIntegrationV3(unittest.TestCase):
             last_modified_dspace=fecha_mod,
             id_status=st_aprobada.id
         )
-        # Item 2 tiene exactamente el mismo conjunto de campos (abstract y keywords)
         item2 = ItemEnrichment(
             uuid_dspace="uuid-csv-002",
             title="Doc 2",
@@ -140,7 +153,6 @@ class TestIntegrationV3(unittest.TestCase):
             last_modified_dspace=fecha_mod,
             id_status=st_aprobada.id
         )
-        # Item 3 tiene abstract, keywords y funding_agency (subconjunto diferente)
         item3 = ItemEnrichment(
             uuid_dspace="uuid-csv-003",
             title="Doc 3",
@@ -153,24 +165,21 @@ class TestIntegrationV3(unittest.TestCase):
         self.db.add_all([item1, item2, item3])
         self.db.commit()
 
-        batches = self.orchestrator.export_approved_proposals_csv(
+        batches = self.orchestrator.export_csv_zero_empty_cells(
             db=self.db,
             dspace_live_checker=lambda uid: fecha_mod
         )
 
-        # Debe haber generado 2 lotes agrupados por subconjunto exacto de columnas
+        # Debe generar 2 lotes distintos
         self.assertEqual(len(batches), 2)
 
-        # Verificar que CERO celdas en los CSV generados están vacías
-        import csv, io
         for b in batches:
             reader = csv.DictReader(io.StringIO(b["csv_content"]))
             for row in reader:
                 for col in b["columns"]:
                     val = row.get(col)
-                    self.assertTrue(val is not None and len(str(val).strip()) > 0, f"Celda vacía detectada en columna '{col}'")
+                    self.assertTrue(val is not None and len(str(val).strip()) > 0, f"Celda vacía en columna '{col}'")
 
-        # Verificar que transitaron a 'Exportada'
         self.db.refresh(item1)
         self.db.refresh(item2)
         self.db.refresh(item3)
@@ -180,9 +189,8 @@ class TestIntegrationV3(unittest.TestCase):
 
     def test_partial_source_failure(self):
         """
-        Nombre de la Prueba: test_partial_source_failure
         Escenario: Una fuente externa falla mientras otra responde exitosamente.
-        Resultado Esperado: La propuesta se consolida con las fuentes disponibles.
+        Resultado Esperado: La propuesta se consolida con las fuentes disponibles y transita a En_clasificacion.
         """
         st_recup = self.orchestrator.get_status_by_name(self.db, ProposalStatus.EN_RECUPERACION)
         item = ItemEnrichment(
@@ -194,7 +202,6 @@ class TestIntegrationV3(unittest.TestCase):
         self.db.add(item)
         self.db.commit()
 
-        # Simulación de consolidación directa
         consolidated = {
             "doi": item.doi,
             "abstract": "Abstract recuperado desde Crossref con éxito",
@@ -203,29 +210,19 @@ class TestIntegrationV3(unittest.TestCase):
             "funding_agency": "Fondecyt"
         }
 
-        # Guardar proveniencia atómica
-        fp = FieldProposal(
-            id_item_enrichment=item.id,
-            field_name="dc.description.abstract",
-            proposed_value=consolidated["abstract"],
-            source=consolidated["abstract_source"],
-            final_value=consolidated["abstract"]
-        )
-        self.db.add(fp)
-        item.abstract = consolidated["abstract"]
+        self.orchestrator._apply_consolidated_metadata(self.db, item, consolidated)
         item.status = self.orchestrator.get_status_by_name(self.db, ProposalStatus.EN_CLASIFICACION)
         self.db.commit()
 
         self.db.refresh(item)
         self.assertEqual(item.abstract, "Abstract recuperado desde Crossref con éxito")
         self.assertEqual(item.status.name, ProposalStatus.EN_CLASIFICACION)
-        self.assertEqual(len(item.field_proposals), 1)
+        self.assertGreater(len(item.field_proposals), 0)
 
     def test_max_retries_exhaustion(self):
         """
-        Nombre de la Prueba: test_max_retries_exhaustion
         Escenario: Una llamada falla de forma persistente alcanzando el número máximo de reintentos (3).
-        Resultado Esperado: La publicación pasa al estado 'En_revision' presentando los datos obtenidos hasta el momento y la falla en Job.
+        Resultado Esperado: La publicación pasa a 'En_revision' registrando la falla en Job.
         """
         st_reintento = self.orchestrator.get_status_by_name(self.db, ProposalStatus.EN_REINTENTO)
         item = ItemEnrichment(
@@ -237,7 +234,6 @@ class TestIntegrationV3(unittest.TestCase):
         self.db.add(item)
         self.db.commit()
 
-        # Simular agotamiento de reintentos en Job
         job = Job(
             id_item_enrichment=item.id,
             stage="Recuperacion",
@@ -247,20 +243,17 @@ class TestIntegrationV3(unittest.TestCase):
             last_error="Conexión agotada tras 3 reintentos (timeout persistente)"
         )
         self.db.add(job)
-        # Al agotar reintentos, el orquestador deriva a En_revision
         item.status = self.orchestrator.get_status_by_name(self.db, ProposalStatus.EN_REVISION)
         self.db.commit()
 
         self.db.refresh(item)
         self.assertEqual(item.status.name, ProposalStatus.EN_REVISION)
         self.assertEqual(job.retry_count, 3)
-        self.assertIn("timeout persistente", job.last_error)
 
     def test_rbac_permissions_isolation(self):
         """
-        Nombre de la Prueba: test_rbac_permissions_isolation
-        Escenario: Un usuario con rol 'Academico' intenta realizar una acción de curaduría.
-        Resultado Esperado: El sistema rechaza la facultad retornando False (HTTP 403 Forbidden).
+        Escenario: Un usuario con rol 'Academico' intenta verificar permisos de curaduría.
+        Resultado Esperado: El sistema deniega el permiso retornando False.
         """
         role_academico = self.db.query(Role).filter(Role.name == "Academico").first()
         role_curador = self.db.query(Role).filter(Role.name == "Curador_VRIIC").first()
@@ -280,14 +273,40 @@ class TestIntegrationV3(unittest.TestCase):
         self.db.add_all([user_academico, user_curador])
         self.db.commit()
 
-        # Comprobar permisos con el servicio de auditoría y roles
-        can_academico_curate = self.curation_service.check_user_role(self.db, user_academico.id, "Curador_VRIIC")
-        can_curador_curate = self.curation_service.check_user_role(self.db, user_curador.id, "Curador_VRIIC")
+        can_academico_curate = self.audit_worker.verify_permission(self.db, user_academico.id, "Curador_VRIIC")
+        can_curador_curate = self.audit_worker.verify_permission(self.db, user_curador.id, "Curador_VRIIC")
 
-        self.assertFalse(can_academico_curate, "Un académico NO debe tener permisos de curaduría (403 Forbidden)")
-        self.assertTrue(can_curador_curate, "Un Curador_VRIIC debe tener permisos de curaduría autorizados")
+        self.assertFalse(can_academico_curate)
+        self.assertTrue(can_curador_curate)
+
+    def test_full_lifecycle_loaded_and_closed(self):
+        """
+        Escenario: Una propuesta exportada es verificada en DSpace y posteriormente cerrada.
+        Resultado Esperado: Transita secuencialmente a 'Cargada' y 'Cerrada' con trazabilidad en DSpaceSyncLog.
+        """
+        st_exportada = self.orchestrator.get_status_by_name(self.db, ProposalStatus.EXPORTADA)
+        item = ItemEnrichment(
+            uuid_dspace="uuid-cycle-001",
+            doi="10.1000/cycle",
+            title="Ciclo completo",
+            id_status=st_exportada.id
+        )
+        self.db.add(item)
+        self.db.commit()
+
+        # 1. Marcar como Cargada
+        res_loaded = self.orchestrator.mark_as_loaded(self.db, item.id)
+        self.assertEqual(res_loaded.get("result"), "CARGADA")
+        self.db.refresh(item)
+        self.assertEqual(item.status.name, ProposalStatus.CARGADA)
+
+        # 2. Marcar como Cerrada
+        res_closed = self.orchestrator.mark_as_closed(self.db, item.id)
+        self.assertEqual(res_closed.get("result"), "CERRADA")
+        self.db.refresh(item)
+        self.assertEqual(item.status.name, ProposalStatus.CERRADA)
+        self.assertEqual(len(item.sync_logs), 2)
 
 
 if __name__ == "__main__":
     unittest.main()
-

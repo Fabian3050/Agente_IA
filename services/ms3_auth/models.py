@@ -5,7 +5,10 @@ from sqlalchemy import Column, String, Boolean, JSON, Text, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from pydantic import BaseModel, Field
 
-from common.database import Base
+try:
+    from common.database import Base
+except ImportError:
+    from services.common.database import Base
 
 
 # =============================================================================
@@ -32,9 +35,11 @@ class User(Base):
     name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
     email = Column(String(255), unique=True, nullable=False, index=True)
+    sub = Column(String(255), unique=True, nullable=True, index=True)  # Subject OIDC / SSO USACH
     orcid = Column(String(50), nullable=True)
     dspace_person_id = Column(String(100), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
+    last_login = Column(DateTime, nullable=True)
 
     role = relationship("Role", back_populates="users")
     audit_logs = relationship("AuditLog", back_populates="user")
@@ -43,7 +48,7 @@ class User(Base):
 class AuditLog(Base):
     """
     Bitácora inmutable de decisiones humanas de curaduría (INSERT-only).
-    Se revoca UPDATE y DELETE para garantizar inmutabilidad.
+    Se revoca UPDATE y DELETE para garantizar inmutabilidad según Sección 2.5.
     """
     __tablename__ = "audit_log"
     __table_args__ = {'extend_existing': True}
@@ -90,7 +95,59 @@ class UserDTO(BaseModel):
     last_name: str
     email: str
     role_name: str
+    sub: Optional[str] = None
     orcid: Optional[str] = None
     dspace_person_id: Optional[str] = None
     is_active: bool
+    last_login: Optional[datetime] = None
 
+
+class TokenResponseDTO(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserDTO
+
+
+class OIDCCallbackRequest(BaseModel):
+    code: str
+    state: Optional[str] = None
+
+
+class OIDCTokenExchangeRequest(BaseModel):
+    id_token: str = Field(description="JWT ID Token emitido por el proveedor OIDC institucional")
+
+
+class MockLoginRequest(BaseModel):
+    email: str
+    role_name: str = "Curador_VRIIC"  # 'Academico', 'Curador_VRIIC', 'Admin'
+    name: str = "Usuario"
+    last_name: str = "Institucional"
+    orcid: Optional[str] = None
+    dspace_person_id: Optional[str] = None
+
+
+class CreateUserRequest(BaseModel):
+    email: str = Field(description="Correo electrónico institucional")
+    name: str = Field(description="Nombres")
+    last_name: str = Field(description="Apellidos")
+    role_name: str = Field(default="Curador_VRIIC", description="'Admin', 'Curador_VRIIC' o 'Academico'")
+    orcid: Optional[str] = Field(default=None, description="Identificador persistente ORCID")
+    dspace_person_id: Optional[str] = Field(default=None, description="UUID del perfil de persona en DSpace-CRIS")
+    sub: Optional[str] = Field(default=None, description="Subject OIDC del proveedor institucional")
+    is_active: bool = Field(default=True, description="Estado de activación del usuario")
+
+
+class TokenIntrospectRequest(BaseModel):
+    token: str
+
+
+class TokenIntrospectResponse(BaseModel):
+    active: bool
+    user_id: Optional[str] = None
+    email: Optional[str] = None
+    name: Optional[str] = None
+    role: Optional[str] = None
+    orcid: Optional[str] = None
+    dspace_person_id: Optional[str] = None
+    exp: Optional[int] = None

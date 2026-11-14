@@ -7,8 +7,15 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from pydantic import BaseModel, Field
 
-from common.database import Base
-from models.item_model import Item
+try:
+    from common.database import Base
+except ImportError:
+    from services.common.database import Base
+
+try:
+    from models.item_model import Item
+except ImportError:
+    from services.ms4_orchestrator.models.item_model import Item
 
 
 # =============================================================================

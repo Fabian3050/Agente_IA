@@ -2,7 +2,10 @@ import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
-from models import AuditLog, User, Role
+try:
+    from models import AuditLog, User, Role
+except ImportError:
+    from services.ms3_auth.models import AuditLog, User, Role
 
 
 class MS3AuditWorker:

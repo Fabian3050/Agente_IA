@@ -1,6 +1,9 @@
 import os
 from sqlalchemy.orm import Session
-from models import Status, ProposalStatus
+try:
+    from models import Status, ProposalStatus
+except ImportError:
+    from services.ms4_orchestrator.models import Status, ProposalStatus
 
 
 def seed_statuses(db: Session) -> int:

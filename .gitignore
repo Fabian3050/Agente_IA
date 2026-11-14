@@ -18,7 +18,6 @@ lib/
 lib64/
 parts/
 sdist/
-var/
 wheels/
 share/python-wheels/
 *.egg-info/
@@ -27,7 +26,7 @@ share/python-wheels/
 MANIFEST
 
 # =============================================================================
-# Entornos Virtuales
+# Entornos Virtuales (Python)
 # =============================================================================
 venv/
 .venv/
@@ -37,16 +36,60 @@ env.bak/
 venv.bak/
 
 # =============================================================================
+# Node.js & Frontend (Vue / Vite / Tailwind)
+# =============================================================================
+node_modules/
+*/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnpm-debug.log*
+.npm/
+
+# Build artifacts de Frontend
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.tsbuildinfo
+*.tsbuildinfo
+.vite/
+frontend/.vite/
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
+# =============================================================================
 # Variables de Entorno y Secretos
 # =============================================================================
 .env
 .env.*
 !.env.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 secrets/*.txt
 !secrets/.gitkeep
+*.pem
+*.key
+*.cert
+*.crt
 
 # =============================================================================
-# Caches de Aplicación y Pruebas
+# Bases de Datos & Volúmenes de Persistencia Local
+# =============================================================================
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+postgres_data/
+pgdata/
+rabbitmq_data/
+ollama_data/
+
+# =============================================================================
+# Caches de Aplicación, Pruebas y Cobertura
 # =============================================================================
 cache_dspace/
 cache_dspace/*
@@ -57,6 +100,22 @@ cache_dspace/*
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+.eslintcache/
+
+# =============================================================================
+# Logs y Archivos Temporales de Ejecución
+# =============================================================================
+*.log
+logs/
+*.pid
+*.seed
+*.pid.lock
+tmp/
+temp/
+exports/*.csv
+!exports/.gitkeep
+csv_exports/*.csv
+!csv_exports/.gitkeep
 
 # =============================================================================
 # Sistema Operativo y Editores
@@ -68,7 +127,11 @@ htmlcov/
 .Trashes
 ehthumbs.db
 Thumbs.db
+Desktop.ini
 .idea/
 .vscode/
+*.sublime-workspace
+*.sublime-project
 *.swp
 *.swo
+*~

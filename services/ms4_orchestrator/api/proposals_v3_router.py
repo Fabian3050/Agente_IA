@@ -10,14 +10,22 @@ from models import (
     ItemEnrichment, Status, ProposalStatus, FieldProposal, ItemCategory,
     Job, DSpaceSyncLog
 )
-from services.orchestrator_service import MS4Orchestrator as DSpaceOrchestratorServiceMS4
+from services.orchestrator_service import MS4Orchestrator
 
 router = APIRouter(
     prefix="/v3/proposals",
     tags=["V3 Proposals & Curation"]
 )
 
-orchestrator = DSpaceOrchestratorServiceMS4()
+orchestrator = MS4Orchestrator()
+
+
+class DetectItemRequest(BaseModel):
+    uuid_dspace: str = Field(description="UUID del ítem en DSpace-CRIS")
+    doi: Optional[str] = Field(default=None, description="DOI de la publicación")
+    title: Optional[str] = Field(default=None, description="Título de la publicación")
+    last_modified_dspace: Optional[datetime] = Field(default=None, description="Fecha de modificación en DSpace")
+    force_reprocess: bool = Field(default=False, description="Forzar reproceso si estaba rechazada")
 
 
 class CurationDecisionRequest(BaseModel):
@@ -26,6 +34,31 @@ class CurationDecisionRequest(BaseModel):
     edited_fields: Optional[Dict[str, str]] = Field(default=None, description="Diccionario {campo: nuevo_valor}")
     rejection_reason: Optional[str] = Field(default=None, description="Motivo en caso de rechazo")
     dspace_live_last_modified: Optional[datetime] = Field(default=None, description="Timestamp actual de DSpace para verificar concurrencia")
+
+
+@router.post("/detect")
+def detect_item(payload: DetectItemRequest, db: Session = Depends(get_db)):
+    """
+    Detecta un ítem con campos faltantes en DSpace-CRIS.
+    Aplica Idempotencia Temprana: omite si ya posee propuesta activa
+    en estado En_revision, Aprobada, Exportada, Cargada o Cerrada.
+    """
+    item, msg = orchestrator.handle_detection(
+        db=db,
+        uuid_dspace=payload.uuid_dspace,
+        doi=payload.doi,
+        title=payload.title,
+        last_modified_dspace=payload.last_modified_dspace,
+        force_reprocess=payload.force_reprocess
+    )
+    if not item:
+        return {"action": "SKIPPED", "message": msg}
+    return {
+        "action": "CREATED_OR_REOPENED",
+        "message": msg,
+        "item_id": str(item.id),
+        "status": item.status.name if item.status else None
+    }
 
 
 @router.get("/")
@@ -89,9 +122,7 @@ def get_proposal_detail(item_id: uuid.UUID, db: Session = Depends(get_db)):
     # Categorías asignadas
     categories = [
         {
-            "scheme": c.category.scheme if c.category else None,
-            "code": c.category.code if c.category else None,
-            "name": c.category.name if c.category else None,
+            "id_category": c.id_category,
             "origin": c.origin,
             "priority_order": c.priority_order,
             "confidence_score": c.confidence_score
@@ -99,15 +130,15 @@ def get_proposal_detail(item_id: uuid.UUID, db: Session = Depends(get_db)):
         for c in item.categories
     ]
 
-    # Auditoría
-    audit = [
+    # Logs de sincronización con DSpace
+    sync_logs = [
         {
-            "id": str(a.id),
-            "action": a.action,
-            "rejection_reason": a.rejection_reason,
-            "timestamp": a.timestamp.isoformat() if a.timestamp else None
+            "id": str(s.id),
+            "sync_type": s.sync_type,
+            "http_status_code": s.http_status_code,
+            "synced_at": s.synced_at.isoformat() if s.synced_at else None
         }
-        for a in item.audit_logs
+        for s in item.sync_logs
     ]
 
     return {
@@ -128,12 +159,27 @@ def get_proposal_detail(item_id: uuid.UUID, db: Session = Depends(get_db)):
         "last_modified_dspace": item.last_modified_dspace.isoformat() if item.last_modified_dspace else None,
         "proposals": proposals,
         "categories": categories,
-        "audit_logs": audit
+        "sync_logs": sync_logs
+    }
+
+
+@router.post("/{item_id}/dispatch-async")
+def dispatch_async(item_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Despacha la solicitud de recuperación a RabbitMQ para procesamiento asíncrono en MS1."""
+    item = db.query(ItemEnrichment).filter(ItemEnrichment.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Propuesta no encontrada")
+
+    published = orchestrator.dispatch_retrieval_async(db, item)
+    return {
+        "status": "DISPATCHED_ASYNC" if published else "FAILED_DISPATCH",
+        "queue": "dspace.retrieval.requests",
+        "item_id": str(item.id)
     }
 
 
 @router.post("/{item_id}/curate")
-def curate_proposal(
+async def curate_proposal(
     item_id: uuid.UUID,
     payload: CurationDecisionRequest,
     db: Session = Depends(get_db)
@@ -143,7 +189,7 @@ def curate_proposal(
     if not item:
         raise HTTPException(status_code=404, detail="Propuesta no encontrada")
 
-    res = orchestrator.apply_curator_decision(
+    res = await orchestrator.apply_curation(
         db=db,
         item=item,
         user_id=payload.user_id,
@@ -159,12 +205,29 @@ def curate_proposal(
 def export_approved_proposals(db: Session = Depends(get_db)):
     """
     Genera lotes CSV estructurados para DSpace con CERO celdas vacías
-    según el protocolo de exportación segura de la Sección 1.4.
+    según el protocolo de exportación segura en dos pasos.
     """
-    batches = orchestrator.export_approved_proposals_csv(db)
+    batches = orchestrator.export_csv_zero_empty_cells(db)
     return {
         "status": "success",
         "total_batches": len(batches),
         "batches": batches
     }
 
+
+@router.post("/{item_id}/mark-loaded")
+def mark_as_loaded(item_id: uuid.UUID, http_status_code: int = 200, db: Session = Depends(get_db)):
+    """Transita una propuesta desde 'Exportada' a 'Cargada' tras importación en DSpace-CRIS."""
+    res = orchestrator.mark_as_loaded(db, item_id, http_status_code=http_status_code)
+    if "error" in res:
+        raise HTTPException(status_code=404, detail=res["error"])
+    return res
+
+
+@router.post("/{item_id}/mark-closed")
+def mark_as_closed(item_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Transita una propuesta desde 'Cargada' a 'Cerrada' completando el ciclo formal."""
+    res = orchestrator.mark_as_closed(db, item_id)
+    if "error" in res:
+        raise HTTPException(status_code=404, detail=res["error"])
+    return res

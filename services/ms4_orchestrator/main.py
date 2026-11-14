@@ -1,6 +1,7 @@
 import sys
 import os
 import uuid
+import logging
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
@@ -13,12 +14,16 @@ if os.path.exists(COMMON_DIR) and COMMON_DIR not in sys.path:
 from fastapi import FastAPI, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from common.database import get_db, Base, engine
+from common.database import get_db, Base, engine, SessionLocal
+from common.messaging import start_background_consumer
 from models import DetectItemRequest, CurateDecisionRequest, ItemEnrichment, Status
 from services.orchestrator_service import MS4Orchestrator
+from services.seed_service import run_full_seeding
 from api.proposals_v3_router import router as proposals_v3_router
 from api.dspace_router import router as dspace_router
 from api.item_router import router as item_router
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="MS4: Conexión, Orquestación e Integración DSpace-CRIS",
@@ -34,9 +39,33 @@ app.include_router(dspace_router)
 app.include_router(item_router)
 
 
+def process_rabbitmq_response(payload: dict):
+    """Callback para procesar respuestas de recuperación emitidas por MS1 vía RabbitMQ."""
+    db = SessionLocal()
+    try:
+        orchestrator.handle_retrieval_response(db, payload)
+        logger.info(f"[MS4] Procesada respuesta RabbitMQ para ítem: {payload.get('item_id')}")
+    except Exception as e:
+        logger.error(f"[MS4] Error procesando respuesta RabbitMQ en MS4: {e}")
+    finally:
+        db.close()
+
+
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
+    try:
+        db = SessionLocal()
+        run_full_seeding(db)
+        db.close()
+    except Exception as e:
+        logger.warning(f"[MS4] Advertencia al sembrar catálogo de estados: {e}")
+
+    try:
+        start_background_consumer("dspace.retrieval.responses", process_rabbitmq_response)
+        logger.info("[MS4] Consumidor de RabbitMQ iniciado para 'dspace.retrieval.responses'.")
+    except Exception as e:
+        logger.warning(f"[MS4] Advertencia al iniciar consumidor de RabbitMQ: {e}")
 
 
 @app.get("/health")
@@ -68,7 +97,7 @@ def detect_publication(payload: DetectItemRequest, db: Session = Depends(get_db)
 @app.post("/pipeline/{item_id}")
 async def execute_pipeline(item_id: uuid.UUID, db: Session = Depends(get_db)):
     """
-    Orquesta las llamadas asíncronas a MS1 (Recuperación) y MS2 (Clasificación).
+    Orquesta las llamadas a MS1 (Recuperación) y MS2 (Clasificación).
     """
     item = db.query(ItemEnrichment).filter(ItemEnrichment.id == item_id).first()
     if not item:
