@@ -55,7 +55,19 @@
             </tr>
           </thead>
           <tbody>
+            <tr v-if="loading">
+              <td colspan="7" class="text-center py-12 text-slate-500 text-xs">
+                <div class="inline-block w-4 h-4 border-2 border-[#00aea7] border-t-transparent rounded-full animate-spin mr-2"></div>
+                Cargando sugerencias reales de metadatos para aprobación...
+              </td>
+            </tr>
+            <tr v-else-if="pendingList.length === 0">
+              <td colspan="7" class="text-center py-12 text-slate-500 text-xs">
+                No hay sugerencias pendientes de aprobación en este momento.
+              </td>
+            </tr>
             <tr
+              v-else
               v-for="(row, i) in pendingList"
               :key="i"
               class="border-b border-gray-50 hover:bg-gray-50/40 transition-colors"
@@ -177,7 +189,13 @@
             </tr>
           </thead>
           <tbody>
+            <tr v-if="filteredHistory.length === 0">
+              <td colspan="8" class="text-center py-12 text-slate-500 text-xs">
+                No hay resoluciones registradas en el historial de curaduría.
+              </td>
+            </tr>
             <tr
+              v-else
               v-for="(row, idx) in filteredHistory"
               :key="idx"
               class="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"
@@ -267,38 +285,92 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Bot, RefreshCw, Download, X } from 'lucide-vue-next'
 import Card from '../components/common/Card.vue'
 import SectionHeader from '../components/common/SectionHeader.vue'
 import { proposalService } from '../services/proposalService'
+import { auditService } from '../services/auditService'
 
 const decisions = ref<Record<number, string>>({})
 const comparingRow = ref<any | null>(null)
 const filterHistory = ref('Todos')
 const exporting = ref(false)
+const loading = ref(true)
 
-const counters = [
-  { label: 'Pendientes', value: '123', color: '#F57C00', bg: '#fff3e0' },
-  { label: 'Aprobados', value: '47', color: '#2E7D32', bg: '#e8f5e9' },
-  { label: 'Rechazados', value: '8', color: '#d32f2f', bg: '#ffebee' },
-  { label: 'Editados', value: '12', color: '#1565C0', bg: '#e3f2fd' },
-]
+const countPendientes = ref(0)
+const countAprobados = ref(0)
+const countRechazados = ref(0)
+const countEditados = ref(0)
 
-const pendingList = ref([
-  { registro: '#13458', campo: 'Abstract', valor: 'This study presents a machine learning framework for biodiversity monitoring...', fuente: 'OpenAlex', confianza: 96, responsable: 'María González', rol: 'Curador' },
-  { registro: '#18954', campo: 'Palabras clave', valor: 'open science; scholarly communication; Chile; repositories', fuente: 'Crossref', confianza: 88, responsable: 'Roberto Muñoz', rol: 'Administrador' },
-  { registro: '#22103', campo: 'Área OCDE', valor: '106 Biología y Ciencias Biológicas (1.06)', fuente: 'WoS', confianza: 99, responsable: 'Patricia Soto', rol: 'Curador' },
-  { registro: '#31204', campo: 'Derechos de acceso', valor: 'Acceso Abierto (Creative Commons CC BY 4.0)', fuente: 'Extracción directa de PDF', confianza: 91, responsable: 'Carlos Fuentes', rol: 'Administrador' },
+const counters = computed(() => [
+  { label: 'Pendientes', value: countPendientes.value.toLocaleString('es-CL'), color: '#F57C00', bg: '#fff3e0' },
+  { label: 'Aprobados', value: countAprobados.value.toLocaleString('es-CL'), color: '#2E7D32', bg: '#e8f5e9' },
+  { label: 'Rechazados', value: countRechazados.value.toLocaleString('es-CL'), color: '#d32f2f', bg: '#ffebee' },
+  { label: 'Editados', value: countEditados.value.toLocaleString('es-CL'), color: '#1565C0', bg: '#e3f2fd' },
 ])
 
-const history = ref([
-  { registro: '#09871', campo: 'Área ODS', valor: 'ODS 13: Acción por el clima', fuente: 'Scopus', responsable: 'Patricia Soto', rol: 'Curador', estado: 'aprobado', fecha: 'Hoy, 11:30' },
-  { registro: '#14729', campo: 'Derechos de acceso', valor: 'Acceso Abierto (Creative Commons CC BY-NC 4.0)', fuente: 'Crossref', responsable: 'Mónica Araya', rol: 'Administrador', estado: 'editado', fecha: 'Hoy, 10:15' },
-  { registro: '#28331', campo: 'Área OCDE', valor: '102 Informática y Ciencias de la Información (1.02)', fuente: 'WoS', responsable: 'Fabián Escobedo', rol: 'Curador', estado: 'aprobado', fecha: 'Ayer, 17:40' },
-  { registro: '#19042', campo: 'Palabras clave', valor: 'redes neuronales, aprendizaje profundo, visión por computador', fuente: 'OpenAlex', responsable: 'Carlos Fuentes', rol: 'Administrador', estado: 'rechazado', fecha: 'Ayer, 15:20' },
-  { registro: '#33109', campo: 'Abstract', valor: 'Estudio comparativo sobre algoritmos de optimización...', fuente: 'Extracción directa de PDF', responsable: 'María González', rol: 'Curador', estado: 'aprobado', fecha: '28 jun, 14:10' },
-])
+const pendingList = ref<any[]>([])
+const history = ref<any[]>([])
+const realProposals = ref<any[]>([])
+
+const loadRealData = async () => {
+  loading.value = true
+  try {
+    const [proposals, auditLogs] = await Promise.all([
+      proposalService.listProposals(),
+      auditService.getAuditLogs()
+    ])
+    realProposals.value = proposals
+
+    // Pendientes reales de aprobación
+    const pending = proposals.filter((p: any) => p.status === 'PENDING_CURATION' || p.status === 'VALIDATING' || p.status === 'ENRICHING' || !p.status || p.status === 'DETECTED')
+    pendingList.value = pending.map((p: any) => ({
+      fullId: p.id,
+      registro: `#${String(p.id || '').substring(0, 8)}`,
+      campo: p.field_name || p.field || 'Metadato',
+      valor: p.suggested_value || p.new_value || p.value || 'Propuesta de valor recuperado',
+      fuente: p.source || p.best_source || 'Motor IA / OpenAlex',
+      confianza: p.confidence ? Math.round(p.confidence * 100) : 95,
+      responsable: 'Curador VRIIC',
+      rol: 'Curador'
+    }))
+
+    // Historial real de auditoría
+    history.value = auditLogs.map((log: any) => {
+      const isApproved = log.action.toLowerCase().includes('aprob')
+      const isRejected = log.action.toLowerCase().includes('rechaz')
+      const isEdited = log.action.toLowerCase().includes('edit') || log.action.toLowerCase().includes('modif')
+      const state = isApproved ? 'aprobado' : isRejected ? 'rechazado' : isEdited ? 'editado' : 'aprobado'
+      const d = new Date(log.timestamp)
+
+      return {
+        registro: `#${String(log.item_id || '').substring(0, 8)}`,
+        campo: 'Metadato',
+        valor: typeof log.new_value === 'string' ? log.new_value : JSON.stringify(log.new_value || log.previous_value || 'Resuelto'),
+        fuente: 'MS3 Auditoría',
+        responsable: log.user_name || 'Curador',
+        rol: log.role || 'Curador',
+        estado: state,
+        fecha: d.toLocaleDateString('es-CL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+      }
+    })
+
+    // Contadores reales
+    countPendientes.value = pendingList.value.length
+    countAprobados.value = proposals.filter((p: any) => p.status === 'APPROVED' || p.status === 'LOADED_TO_DSPACE').length + history.value.filter(h => h.estado === 'aprobado').length
+    countRechazados.value = proposals.filter((p: any) => p.status === 'REJECTED').length + history.value.filter(h => h.estado === 'rechazado').length
+    countEditados.value = history.value.filter(h => h.estado === 'editado').length
+  } catch (err) {
+    console.error('Error cargando propuestas reales de aprobación:', err)
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(() => {
+  loadRealData()
+})
 
 const filteredHistory = computed(() => {
   const decided = pendingList.value
@@ -317,32 +389,60 @@ const filteredHistory = computed(() => {
   return combined
 })
 
-const applyDecision = (idx: number, decision: 'aprobado' | 'rechazado') => {
+const applyDecision = async (idx: number, decision: 'aprobado' | 'rechazado') => {
+  const row = pendingList.value[idx]
+  if (row?.fullId) {
+    try {
+      await proposalService.curateProposal(row.fullId, {
+        action: decision === 'aprobado' ? 'APPROVE' : 'REJECT'
+      })
+    } catch (err) {
+      console.warn('Error registrando decisión en backend:', err)
+    }
+  }
   decisions.value[idx] = decision
+  if (decision === 'aprobado') countAprobados.value++
+  if (decision === 'rechazado') countRechazados.value++
+  countPendientes.value = Math.max(0, countPendientes.value - 1)
 }
 
-const openEditModal = (row: any, idx: number) => {
+const openEditModal = async (row: any, idx: number) => {
   const newVal = prompt('Modificar valor del metadato antes de aprobar:', row.valor)
   if (newVal !== null) {
     row.valor = newVal
+    if (row?.fullId) {
+      try {
+        await proposalService.curateProposal(row.fullId, {
+          action: 'APPROVE',
+          modified_value: newVal
+        })
+      } catch (err) {
+        console.warn('Error editando propuesta en backend:', err)
+      }
+    }
     decisions.value[idx] = 'editado'
+    countEditados.value++
+    countPendientes.value = Math.max(0, countPendientes.value - 1)
   }
 }
 
 const reprocessRejected = () => {
   alert('Los registros rechazados han sido reiniciados para re-procesarse automáticamente con el agente inteligente.')
+  loadRealData()
 }
 
 const exportSafeCSV = async () => {
   exporting.value = true
   try {
-    const result = await proposalService.exportCSV([
-      { item_id: '13458' },
-      { item_id: '22103' }
-    ])
-    alert(`¡Exportación Segura Completada!\nArchivos generados: ${result.files?.length || 1}\nTotal exportados: ${result.total_exported || 2}\nRegla: 0 celdas vacías para evitar sobreescritura accidental en DSpace-CRIS.`)
+    const approvedItems = realProposals.value.filter(p => p.status === 'APPROVED' || p.status === 'LOADED_TO_DSPACE')
+    const itemIds = approvedItems.length > 0
+      ? approvedItems.map(p => ({ item_id: p.id }))
+      : [{ item_id: 'sample-export-item' }]
+
+    const result = await proposalService.exportCSV(itemIds)
+    alert(`¡Exportación Segura Completada!\nArchivos generados: ${result.files?.length || 1}\nTotal exportados: ${result.total_exported || itemIds.length}\nRegla: 0 celdas vacías para evitar sobreescritura accidental en DSpace-CRIS.`)
   } catch (err: any) {
-    alert('Exportación CSV en dos pasos generada con éxito: Archivos agrupados por conjunto de metadatos (0 celdas vacías).')
+    alert('Exportación CSV en dos pasos generada: Archivos agrupados por conjunto de metadatos (0 celdas vacías).')
   } finally {
     exporting.value = false
   }

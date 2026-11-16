@@ -15,12 +15,7 @@ export const retrievalService = {
         lastQuery: s.last_query || 'Reciente',
       }))
     } catch {
-      // Return default API sources if service returns empty
-      return [
-        { name: 'OpenAlex', status: 'Conectado', latency: '142ms', queries: 1920, recovered: 1847, availability: 99.9, lastQuery: 'Hace 2 min' },
-        { name: 'CrossRef', status: 'Conectado', latency: '89ms', queries: 1250, recovered: 1203, availability: 99.7, lastQuery: 'Hace 5 min' },
-        { name: 'Unpaywall', status: 'Conectado', latency: '165ms', queries: 840, recovered: 790, availability: 99.4, lastQuery: 'Hace 10 min' },
-      ]
+      return []
     }
   },
 

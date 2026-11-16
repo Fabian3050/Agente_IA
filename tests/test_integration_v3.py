@@ -307,6 +307,21 @@ class TestIntegrationV3(unittest.TestCase):
         self.assertEqual(item.status.name, ProposalStatus.CERRADA)
         self.assertEqual(len(item.sync_logs), 2)
 
+    def test_detect_missing_batch(self):
+        """
+        Escenario: Detección en lote de registros incompletos desde el frontend (POST /v3/proposals/detect-missing).
+        Resultado Esperado: El orquestador procesa los ítems y los coloca en estado En_recuperacion sin error 405.
+        """
+        item, msg = self.orchestrator.handle_detection(
+            self.db,
+            uuid_dspace="uuid-test-detect-missing-1",
+            doi="10.1000/missing-1",
+            title="Artículo Faltante 1"
+        )
+        self.assertIsNotNone(item)
+        self.assertEqual(item.status.name, ProposalStatus.EN_RECUPERACION)
+        self.assertIn("CREADA_Y_EN_RECUPERACION", msg)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,7 +17,7 @@ export const classificationService = {
     }
   },
 
-  async classifyText(title: string, abstractText: string, scheme: 'OCDE' | 'ODS' = 'OCDE'): Promise<ClassificationResult> {
+  async classifyText(title: string, abstractText: string, scheme: 'OCDE' | 'ODS' = 'OCDE'): Promise<ClassificationResult | null> {
     try {
       const endpoint = scheme === 'OCDE' ? '/classify/ocde' : '/classify/ods'
       const res = await ms2Client.post(endpoint, {
@@ -26,13 +26,7 @@ export const classificationService = {
       })
       return res.data
     } catch {
-      // Fallback response
-      return {
-        code: scheme === 'OCDE' ? '106' : 'ODS-03',
-        label: scheme === 'OCDE' ? 'Biología y Ciencias Biológicas (1.06)' : 'Salud y Bienestar',
-        confidence: 0.94,
-        justification: 'Inferencia basada en términos biomédicos y abstract analizado.',
-      }
+      return null
     }
   }
 }

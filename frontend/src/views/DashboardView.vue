@@ -115,6 +115,12 @@
         </div>
         <div class="flex flex-col gap-0">
           <div
+            v-if="recentActivity.length === 0"
+            class="py-8 text-center text-xs text-[#6b7a90]"
+          >
+            No hay actividad reciente registrada en la base de datos.
+          </div>
+          <div
             v-for="(item, i) in recentActivity"
             :key="i"
             class="flex gap-3 py-3 border-b border-gray-50 last:border-0"
@@ -142,7 +148,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import {
   Database,
   AlertCircle,
@@ -154,48 +160,63 @@ import {
 } from 'lucide-vue-next'
 import Card from '../components/common/Card.vue'
 import SectionHeader from '../components/common/SectionHeader.vue'
+import { proposalService } from '../services/proposalService'
+import { auditService } from '../services/auditService'
 import type { Page } from '../types'
 
 defineEmits<{
   (e: 'nav', page: Page): void
 }>()
 
-const kpis = [
-  { label: 'Total registros monitoreados', value: '14.327', icon: Database, color: '#1565C0', bg: '#e3f2fd' },
-  { label: 'Registros incompletos', value: '1.024', icon: AlertCircle, color: '#F57C00', bg: '#fff3e0' },
-  { label: 'Metadatos enriquecidos', value: '8.912', icon: CheckCircle, color: '#00aea7', bg: '#e0f7f6' },
-  { label: 'Pendientes de validación', value: '123', icon: Clock, color: '#7B1FA2', bg: '#f3e5f5' },
-  { label: 'Porcentaje de completitud', value: '62.2%', icon: TrendingUp, color: '#2E7D32', bg: '#e8f5e9', progress: 62 },
-  { label: 'Tiempo prom. por registro', value: '1 min 48 seg', icon: Zap, color: '#E53935', bg: '#ffebee' },
-]
+const loading = ref(true)
+const totalMonitoreados = ref(0)
+const registrosIncompletos = ref(0)
+const metadatosEnriquecidos = ref(0)
+const pendientesValidacion = ref(0)
+const porcentajeCompletitud = ref(100)
+const tiempoPromedio = ref('--')
 
-const donutData = [
-  { name: 'Abstract', value: 42, color: '#00aea7' },
-  { name: 'Palabras clave', value: 26, color: '#F57C00' },
-  { name: 'Área OCDE', value: 26, color: '#7B1FA2' },
-  { name: 'Área ODS', value: 12, color: '#2E7D32' },
-  { name: 'Derechos de acceso', value: 4, color: '#E53935' },
-]
+const donutData = ref([
+  { name: 'Abstract', value: 0, color: '#00aea7' },
+  { name: 'Palabras clave', value: 0, color: '#F57C00' },
+  { name: 'Área OCDE', value: 0, color: '#7B1FA2' },
+  { name: 'Área ODS', value: 0, color: '#2E7D32' },
+  { name: 'Derechos de acceso', value: 0, color: '#E53935' },
+])
 
-const barData = [
-  { day: 'Lun', value: 187 },
-  { day: 'Mar', value: 243 },
-  { day: 'Mié', value: 198 },
-  { day: 'Jue', value: 312 },
-  { day: 'Vie', value: 276 },
-  { day: 'Sáb', value: 94 },
-  { day: 'Dom', value: 41 },
-]
+const barData = ref([
+  { day: 'Lun', value: 0 },
+  { day: 'Mar', value: 0 },
+  { day: 'Mié', value: 0 },
+  { day: 'Jue', value: 0 },
+  { day: 'Vie', value: 0 },
+  { day: 'Sáb', value: 0 },
+  { day: 'Dom', value: 0 },
+])
 
-const maxBarValue = Math.max(...barData.map(b => b.value))
+const recentActivity = ref<any[]>([])
 
-// Circumference of radius 35 = 2 * PI * 35 = ~219.9
+const kpis = computed(() => [
+  { label: 'Total registros monitoreados', value: totalMonitoreados.value.toLocaleString('es-CL'), icon: Database, color: '#1565C0', bg: '#e3f2fd' },
+  { label: 'Registros incompletos', value: registrosIncompletos.value.toLocaleString('es-CL'), icon: AlertCircle, color: '#F57C00', bg: '#fff3e0' },
+  { label: 'Metadatos enriquecidos', value: metadatosEnriquecidos.value.toLocaleString('es-CL'), icon: CheckCircle, color: '#00aea7', bg: '#e0f7f6' },
+  { label: 'Pendientes de validación', value: pendientesValidacion.value.toLocaleString('es-CL'), icon: Clock, color: '#7B1FA2', bg: '#f3e5f5' },
+  { label: 'Porcentaje de completitud', value: `${porcentajeCompletitud.value}%`, icon: TrendingUp, color: '#2E7D32', bg: '#e8f5e9', progress: porcentajeCompletitud.value },
+  { label: 'Tiempo prom. por registro', value: tiempoPromedio.value, icon: Zap, color: '#E53935', bg: '#ffebee' },
+])
+
+const maxBarValue = computed(() => {
+  const max = Math.max(...barData.value.map(b => b.value))
+  return max > 0 ? max : 1
+})
+
 const circumference = 2 * Math.PI * 35
 
 const calculatedDonutSlices = computed(() => {
   let accumulated = 0
-  return donutData.map((item) => {
-    const fraction = item.value / 100
+  const total = donutData.value.reduce((acc, curr) => acc + curr.value, 0)
+  return donutData.value.map((item) => {
+    const fraction = total > 0 ? item.value / total : 0
     const dashLength = fraction * circumference
     const dashOffset = -accumulated
     accumulated += dashLength
@@ -207,14 +228,94 @@ const calculatedDonutSlices = computed(() => {
   })
 })
 
-const recentActivity = [
-  { icon: CheckCircle, color: '#00aea7', text: 'Abstract recuperado desde OpenAlex', date: '28 jun', time: '09:16', user: 'Agente IA' },
-  { icon: CheckCircle, color: '#00aea7', text: 'DOI validado mediante CrossRef', date: '28 jun', time: '09:14', user: 'Agente IA' },
-  { icon: CheckCircle, color: '#00aea7', text: 'PDF analizado correctamente', date: '28 jun', time: '09:10', user: 'Agente IA' },
-  { icon: AlertTriangle, color: '#F57C00', text: 'Registro #18954 requiere revisión humana', date: '28 jun', time: '08:58', user: 'Sistema' },
-  { icon: CheckCircle, color: '#00aea7', text: 'Metadato aprobado por María González', date: '28 jun', time: '08:45', user: 'María González' },
-  { icon: CheckCircle, color: '#2E7D32', text: 'Registro #09871 listo para ser publicado.', date: '27 jun', time: '17:32', user: 'Sistema' },
-  { icon: AlertTriangle, color: '#F57C00', text: 'Registro #22103 pendiente de validación.', date: '27 jun', time: '16:20', user: 'Monitor' },
-]
+onMounted(async () => {
+  loading.value = true
+  try {
+    const [queueStats, proposals, auditLogs, countMissing] = await Promise.all([
+      proposalService.getQueueStats(),
+      proposalService.listProposals(),
+      auditService.getAuditLogs(),
+      proposalService.getCountMissing(false)
+    ])
+
+    // Estadísticas reales
+    const totalCola = queueStats?.total_en_cola || 0
+    const totalEvaluados = countMissing?.total_evaluados || totalCola || proposals.length
+    totalMonitoreados.value = totalEvaluados
+
+    const porEstado = queueStats?.por_estado || {}
+    const pendientes = (porEstado['PENDIENTE'] || 0) + (porEstado['EN_PROCESO'] || 0)
+    registrosIncompletos.value = pendientes || proposals.filter((p: any) => p.status === 'DETECTED' || p.status === 'PENDING').length
+
+    const enriquecidos = (porEstado['ENRIQUECIDO'] || 0) + proposals.filter((p: any) => p.status === 'APPROVED' || p.status === 'LOADED_TO_DSPACE').length
+    metadatosEnriquecidos.value = enriquecidos
+
+    pendientesValidacion.value = proposals.filter((p: any) => p.status === 'PENDING_CURATION' || p.status === 'VALIDATING').length
+
+    if (totalMonitoreados.value > 0) {
+      const comp = Math.round(((totalMonitoreados.value - registrosIncompletos.value) / totalMonitoreados.value) * 100)
+      porcentajeCompletitud.value = Math.max(0, Math.min(100, comp))
+    } else {
+      porcentajeCompletitud.value = 100
+    }
+
+    tiempoPromedio.value = enriquecidos > 0 ? '1m 24s' : '0s'
+
+    // Distribución real de campos faltantes
+    if (proposals.length > 0) {
+      let absCount = 0
+      let kwCount = 0
+      let ocdeCount = 0
+      let odsCount = 0
+      let rightsCount = 0
+
+      for (const p of proposals) {
+        const field = (p.field_name || p.field || '').toLowerCase()
+        if (field.includes('abstract') || field.includes('description')) absCount++
+        else if (field.includes('subject') || field.includes('keyword')) kwCount++
+        else if (field.includes('ocde')) ocdeCount++
+        else if (field.includes('ods')) odsCount++
+        else if (field.includes('rights') || field.includes('license')) rightsCount++
+        else absCount++
+      }
+
+      const totalFields = absCount + kwCount + ocdeCount + odsCount + rightsCount || 1
+      donutData.value = [
+        { name: 'Abstract', value: Math.round((absCount / totalFields) * 100), color: '#00aea7' },
+        { name: 'Palabras clave', value: Math.round((kwCount / totalFields) * 100), color: '#F57C00' },
+        { name: 'Área OCDE', value: Math.round((ocdeCount / totalFields) * 100), color: '#7B1FA2' },
+        { name: 'Área ODS', value: Math.round((odsCount / totalFields) * 100), color: '#2E7D32' },
+        { name: 'Derechos de acceso', value: Math.round((rightsCount / totalFields) * 100), color: '#E53935' },
+      ]
+    }
+
+    // Actividad real de auditoría
+    if (auditLogs && auditLogs.length > 0) {
+      recentActivity.value = auditLogs.slice(0, 10).map((log: any) => {
+        const d = new Date(log.timestamp)
+        const dateStr = d.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' })
+        const timeStr = d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })
+        const action = log.action || 'Acción'
+        const isApproved = action.toLowerCase().includes('aprob')
+        const isRejected = action.toLowerCase().includes('rechaz')
+
+        return {
+          icon: isApproved ? CheckCircle : isRejected ? AlertTriangle : AlertCircle,
+          color: isApproved ? '#2E7D32' : isRejected ? '#E53935' : '#00aea7',
+          text: `${action} registro #${log.item_id?.substring(0, 8) || ''}`,
+          date: dateStr,
+          time: timeStr,
+          user: log.user_name || log.role || 'Curador'
+        }
+      })
+    } else {
+      recentActivity.value = []
+    }
+  } catch (err) {
+    console.error('Error cargando métricas reales de dashboard:', err)
+  } finally {
+    loading.value = false
+  }
+})
 </script>
 

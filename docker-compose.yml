@@ -136,6 +136,11 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://agente_user:postgres@postgres:5432/agente_ia
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-https://accounts.google.com}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid profile email}
+      MOCK_OIDC_ENABLED: ${MOCK_OIDC_ENABLED:-false}
     ports:
       - "8003:8003"
     depends_on:
@@ -160,6 +165,9 @@ services:
       MS2_CLASSIFICATION_URL: http://ms2-classification:8002
       MS3_AUTH_URL: http://ms3-auth:8003
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      DSPACE_API_URL: ${DSPACE_API_URL:-https://sic.usach.cl/server/api}
+      DSPACE_USERNAME: ${DSPACE_USERNAME:-agente-ia@usach.cl}
+      DSPACE_PASSWORD: ${DSPACE_PASSWORD}
     ports:
       - "8000:8000"
     secrets:
@@ -168,5 +176,24 @@ services:
       - ms1-retrieval
       - ms2-classification
       - ms3-auth
+    networks:
+      - agente_network
+
+  # ---------------------------------------------------------------------------
+  # FRONTEND: Interfaz de Usuario Vue 3 + Nginx (Puerto 5173)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: agente_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - ms4-orchestrator
+      - ms3-auth
+      - ms1-retrieval
+      - ms2-classification
     networks:
       - agente_network

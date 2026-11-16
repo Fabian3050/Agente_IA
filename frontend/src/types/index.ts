@@ -2,7 +2,6 @@ export type Page =
   | 'dashboard'
   | 'monitoreo'
   | 'recuperacion'
-  | 'analisis'
   | 'validacion'
   | 'aprobacion'
   | 'auditoria'
@@ -28,12 +27,16 @@ export type ProposalState =
 export interface User {
   id: string
   sub?: string
-  username: string
+  username?: string
+  name?: string
+  lastName?: string
   email: string
-  role: 'Administrador' | 'Curador' | 'Auditor'
+  role: 'Administrador' | 'Curador' | 'Auditor' | 'Admin' | 'Curador_VRIIC' | 'Academico' | string
   fullName: string
   avatarUrl?: string
   isActive: boolean
+  orcid?: string
+  dspacePersonId?: string
   createdAt?: string
 }
 
@@ -51,6 +54,11 @@ export interface MonitoreoRecord {
   autor: string
   doi: string
   last_modified_dspace?: string
+  abstractEnriquecido?: string
+  palabrasClave?: string[]
+  fuente?: string
+  areaOcde?: any
+  areaOds?: any
 }
 
 export interface MetadataProposal {
@@ -117,4 +125,3 @@ export interface ServiceStatus {
   status: 'online' | 'offline' | 'checking'
   version?: string
 }
-

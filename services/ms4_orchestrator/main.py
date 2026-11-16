@@ -12,6 +12,7 @@ if os.path.exists(COMMON_DIR) and COMMON_DIR not in sys.path:
     sys.path.insert(0, os.path.abspath(os.path.join(CURRENT_DIR, "..")))
 
 from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from common.database import get_db, Base, engine, SessionLocal
@@ -29,6 +30,14 @@ app = FastAPI(
     title="MS4: Conexión, Orquestación e Integración DSpace-CRIS",
     description="Microservicio 4 - Gateway principal, ciclo de vida formal (12 estados), proveniencia atómica y exportación CSV segura.",
     version="3.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 orchestrator = MS4Orchestrator()

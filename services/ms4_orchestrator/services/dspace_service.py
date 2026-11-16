@@ -85,9 +85,10 @@ class DSpaceService:
             values = metadata.get(field, [])
             return [str(v.get("value")).strip() for v in values if v.get("value") is not None and str(v.get("value")).strip()]
 
+        title_candidate = get_metadata_value("dc.title") or indexable_object.get("name") or "Sin título"
         return {
-            "uuid": indexable_object.get("id"),
-            "title": get_metadata_value("dc.title", "Sin título"),
+            "uuid": indexable_object.get("id") or indexable_object.get("uuid"),
+            "title": title_candidate,
             "abstract": get_metadata_value("dc.description.abstract", "No disponible"),
             "doi": get_metadata_value("dc.identifier.doi", "No disponible"),
             "type": get_metadata_value("dc.type", "No disponible"),

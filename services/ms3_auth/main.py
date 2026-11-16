@@ -10,6 +10,7 @@ if os.path.exists(COMMON_DIR) and COMMON_DIR not in sys.path:
     sys.path.insert(0, os.path.abspath(os.path.join(CURRENT_DIR, "..")))
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from common.database import Base, engine, SessionLocal
 from api.audit_router import router as audit_router
@@ -20,6 +21,15 @@ app = FastAPI(
     title="MS3: Gestión de Usuarios, RBAC y Auditoría Inmutable",
     description="Microservicio 3 - Autenticación institucional OpenID Connect / OAuth 2.0, verificación de roles RBAC y bitácora INSERT-only.",
     version="3.0.0"
+)
+
+# Configurar middleware CORS para permitir solicitudes desde el frontend (Vite / Docker / SPA)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(audit_router)

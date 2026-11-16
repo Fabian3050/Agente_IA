@@ -99,3 +99,15 @@ npm run build
 ```
 Genera los archivos estáticos optimizados y minificados en `frontend/dist/`.
 
+### 3. Despliegue con Docker y Docker Compose
+El frontend cuenta con un `Dockerfile` multi-stage (Node 20 + Nginx 1.27 Alpine) y está integrado en el `docker-compose.yml` raíz:
+
+```bash
+# Construir y levantar todo el ecosistema (microservicios + base de datos + frontend)
+docker compose up -d --build
+
+# O construir y levantar únicamente el contenedor del frontend
+docker compose up -d --build frontend
+```
+El frontend se servirá a través de Nginx en `http://localhost:5173`.
+

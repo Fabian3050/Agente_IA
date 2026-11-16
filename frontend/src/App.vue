@@ -36,10 +36,6 @@
           v-else-if="currentPage === 'monitoreo'"
         />
 
-        <AnalisisView
-          v-else-if="currentPage === 'analisis'"
-        />
-
         <ValidacionView
           v-else-if="currentPage === 'validacion'"
         />
@@ -80,7 +76,6 @@ import Header from './components/layout/Header.vue'
 import LoginView from './views/LoginView.vue'
 import DashboardView from './views/DashboardView.vue'
 import MonitoreoView from './views/MonitoreoView.vue'
-import AnalisisView from './views/AnalisisView.vue'
 import ValidacionView from './views/ValidacionView.vue'
 import AprobacionView from './views/AprobacionView.vue'
 import AuditoriaView from './views/AuditoriaView.vue'
@@ -113,13 +108,23 @@ const handleLogout = () => {
   isLoggedIn.value = false
 }
 
-onMounted(() => {
+onMounted(async () => {
   // Check if session token exists
   if (authService.isAuthenticated()) {
     const user = authService.getStoredUser()
     if (user) {
       currentUser.value = user
       isLoggedIn.value = true
+      // Validar validez del token con MS3 (/auth/me)
+      try {
+        const remoteUser = await authService.getCurrentUser()
+        if (remoteUser) {
+          currentUser.value = remoteUser
+        }
+      } catch {
+        // Si el token expiró o es inválido, cerrar sesión
+        handleLogout()
+      }
     }
   }
 })

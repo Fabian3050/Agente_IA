@@ -72,19 +72,29 @@ def get_metrics_history(
 def get_enrichment_queue(
     estado: Optional[str] = Query(None, description="Filtrar por estado: PENDIENTE, EN_PROCESO, ENRIQUECIDO, NO_ENCONTRADO, ERROR, SINCRONIZADO_DSPACE"),
     tipo_falencia: Optional[str] = Query(None, description="Filtrar por falencia: SIN_ABSTRACT_CON_DOI, SIN_DOI_NI_ABSTRACT, etc."),
+    q: Optional[str] = Query(None, description="Búsqueda por título, DOI o UUID"),
     page: int = Query(0, ge=0, description="Número de página"),
-    size: int = Query(50, ge=1, le=200, description="Cantidad de registros por página"),
+    size: int = Query(50, ge=1, le=20000, description="Cantidad de registros por página"),
     db: Session = Depends(get_db)
 ):
     """
     Retorna publicaciones en la cola de enriquecimiento con filtros y paginación para el dashboard.
     """
     from models import DSpaceEnrichmentQueue
+    from sqlalchemy import or_
     query = db.query(DSpaceEnrichmentQueue)
     if estado:
         query = query.filter(DSpaceEnrichmentQueue.estado == estado)
     if tipo_falencia:
         query = query.filter(DSpaceEnrichmentQueue.tipo_falencia == tipo_falencia)
+    if q:
+        query = query.filter(
+            or_(
+                DSpaceEnrichmentQueue.titulo.ilike(f"%{q}%"),
+                DSpaceEnrichmentQueue.doi.ilike(f"%{q}%"),
+                DSpaceEnrichmentQueue.dspace_uuid.ilike(f"%{q}%")
+            )
+        )
 
     total = query.count()
     items = query.order_by(DSpaceEnrichmentQueue.id.asc()).offset(page * size).limit(size).all()
@@ -92,7 +102,30 @@ def get_enrichment_queue(
         "total": total,
         "page": page,
         "size": size,
-        "items": items
+        "items": [
+            {
+                "id": i.id,
+                "dspace_uuid": i.dspace_uuid,
+                "uuid_dspace": i.dspace_uuid,
+                "doi": i.doi,
+                "titulo": i.titulo or (f"Publicación (DOI: {i.doi})" if i.doi else f"Registro DSpace #{i.id}"),
+                "title": i.titulo or (f"Publicación (DOI: {i.doi})" if i.doi else f"Registro DSpace #{i.id}"),
+                "tipo_recurso": i.tipo_recurso,
+                "tipo_falencia": i.tipo_falencia,
+                "estado": i.estado,
+                "fuente_enriquecimiento": i.fuente_enriquecimiento,
+                "abstract_enriquecido": i.abstract_enriquecido,
+                "palabras_clave": i.palabras_clave,
+                "fuente_financiamiento": i.fuente_financiamiento,
+                "derechos_acceso": i.derechos_acceso,
+                "area_ocde": i.area_ocde,
+                "area_ods": i.area_ods,
+                "resumen_original": i.resumen_original,
+                "created_at": i.created_at.isoformat() if i.created_at else None,
+                "updated_at": i.updated_at.isoformat() if i.updated_at else None
+            }
+            for i in items
+        ]
     }
 
 @router.get("/enrichment-queue/stats")

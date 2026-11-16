@@ -15,8 +15,8 @@ class DSpaceAuthClient:
     Maneja la autenticación y peticiones base.
     """
     def __init__(self, base_url: Optional[str] = None):
-        self.base_url = (base_url or settings.dspace_api_url).rstrip('/')
-        self.email = settings.dspace_username
+        self.base_url = (base_url or settings.dspace_api_url or "https://sic.usach.cl/server/api").rstrip('/')
+        self.email = settings.dspace_username or "agente-ia@usach.cl"
         self.password = settings.dspace_password
         
     async def authenticate(self) -> Optional[str]:
@@ -24,6 +24,12 @@ class DSpaceAuthClient:
         Realiza el login en DSpace manejando el token Anti-CSRF.
         Devuelve el token de autorización (JWT).
         """
+        if not self.base_url or not self.base_url.startswith(("http://", "https://")):
+            raise ValueError(
+                f"URL de DSpace inválida: '{self.base_url}'. Debe comenzar con 'http://' o 'https://'. "
+                "Verifica la variable DSPACE_API_URL en el archivo .env o en docker-compose.yml."
+            )
+
         url = f"{self.base_url}/authn/login"
         
         payload = {

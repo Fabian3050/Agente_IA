@@ -10,6 +10,7 @@ if os.path.exists(COMMON_DIR) and COMMON_DIR not in sys.path:
     sys.path.insert(0, os.path.abspath(os.path.join(CURRENT_DIR, "..")))
 
 from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from common.database import get_db, Base, engine
@@ -22,6 +23,14 @@ app = FastAPI(
     title="MS2: Clasificación Área OCDE / ODS",
     description="Microservicio 2 - Inferencia semántica con LLM local Ollama, modelos estructurados Pydantic y bitácora de inferencia.",
     version="3.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 worker = MS2ClassificationWorker()

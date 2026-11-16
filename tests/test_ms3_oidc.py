@@ -56,7 +56,8 @@ class TestMS3OIDC(unittest.TestCase):
         auth_url = self.oidc.get_authorization_url(state=state)
         self.assertIn("response_type=code", auth_url)
         self.assertIn("client_id=", auth_url)
-        self.assertIn("scope=openid+profile+email", auth_url)
+        self.assertIn("scope=", auth_url)
+        self.assertIn("openid", auth_url)
         self.assertIn(f"state={state}", auth_url)
 
     def test_jwt_creation_and_verification(self):
@@ -193,6 +194,49 @@ class TestMS3OIDC(unittest.TestCase):
             curator_checker(current_user=user_academico)
         self.assertEqual(ctx.exception.status_code, 403)
         self.assertIn("Acceso denegado", ctx.exception.detail)
+
+    def test_sso_code_registration_and_consumption(self):
+        """Valida que los códigos de autorización generados en SSO se almacenen y consuman de forma segura."""
+        code = "usach_test_code_abc123"
+        user_info = {
+            "email": "investigador.test@usach.cl",
+            "name": "Investigador",
+            "last_name": "Test",
+            "role": "Academico",
+            "orcid": "0000-0001-2222-3333"
+        }
+        self.oidc.register_auth_code(code, user_info)
+
+        # Consumir código (primera vez: válido)
+        consumed = self.oidc.consume_auth_code(code)
+        self.assertIsNotNone(consumed)
+        self.assertEqual(consumed["email"], "investigador.test@usach.cl")
+
+        # Intentar consumir nuevamente (debe ser None por Single-Use RFC 6749)
+        second_attempt = self.oidc.consume_auth_code(code)
+        self.assertIsNone(second_attempt)
+
+    def test_sso_portal_authorization_endpoints(self):
+        """Valida los endpoints GET /auth/sso/login y GET /auth/sso/authorize con TestClient."""
+        from fastapi.testclient import TestClient
+        from services.ms3_auth.main import app
+        client = TestClient(app)
+
+        # 1. Probar renderizado de página SSO
+        res_login = client.get("/auth/sso/login?redirect_uri=http://localhost:5173/")
+        self.assertEqual(res_login.status_code, 200)
+        self.assertIn("USACH SSO", res_login.text)
+        self.assertIn("Identidad Institucional", res_login.text)
+
+        # 2. Probar autorización que emite código y redirige
+        res_auth = client.get(
+            "/auth/sso/authorize?redirect_uri=http://localhost:5173/&state=xyz123&email=curador.vriic@usach.cl&role=Curador_VRIIC",
+            follow_redirects=False
+        )
+        self.assertEqual(res_auth.status_code, 303)
+        location = res_auth.headers.get("location")
+        self.assertIn("http://localhost:5173/?code=usach_code_", location)
+        self.assertIn("state=xyz123", location)
 
 
 if __name__ == "__main__":

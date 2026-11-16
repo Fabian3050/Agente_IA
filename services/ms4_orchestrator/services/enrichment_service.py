@@ -1,8 +1,6 @@
 import asyncio
 import os
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+import uuid
 from sqlalchemy import func, and_, case
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -42,134 +40,70 @@ class EnrichmentService:
 
         try:
             # ----------------------------------------------------
-            # FASE 1: Búsqueda en Fuentes Académicas
+            # FASE 1: Búsqueda en Fuentes Académicas vía MS1
             # ----------------------------------------------------
-            resultados: List[MetadataResponse] = []
-
-            # 1.1 Si tiene DOI, consultamos directamente por DOI
-            if item.doi and item.doi.strip():
-                try:
-                    resultados = await self.metadata_service.get_metadata_by_doi(item.doi.strip())
-                except Exception as e:
-                    print(f"Error consultando por DOI {item.doi}: {e}")
-
-            # 1.2 Si no tiene DOI o la consulta por DOI no devolvió resultados, buscamos por título
-            if not resultados and item.titulo and len(item.titulo.strip()) > 5:
-                try:
-                    # Búsqueda primero en OpenAlex (optimizado para búsqueda difusa)
-                    candidatos = await self.metadata_service.search_metadata(item.titulo.strip(), source="openalex", limit_per_source=3)
-                    if candidatos:
-                        resultados.extend(candidatos)
-                    else:
-                        # Si no hay en OpenAlex, probamos en todas las fuentes
-                        resultados = await self.metadata_service.search_metadata(item.titulo.strip(), limit_per_source=2)
-                except Exception as e:
-                    print(f"Error consultando por título '{item.titulo}': {e}")
-
-            # 1.3 Procesar y combinar los metadatos obtenidos de las fuentes
-            if resultados:
-                for r in resultados:
-                    if r.source:
-                        fuentes_utilizadas.add(r.source)
-                    
-                    # Abstract (tomamos el primero no vacío con longitud significativa)
-                    if not abstract_encontrado and r.abstract and len(r.abstract.strip()) > 30:
-                        abstract_encontrado = r.abstract.strip()
-
-                    # DOI (si el ítem no tenía DOI y la fuente nos lo proporciona)
-                    if not doi_encontrado and r.doi:
-                        doi_encontrado = r.doi.strip()
-
-                    # Palabras clave
-                    if r.keywords:
-                        for kw in r.keywords:
-                            if kw and kw.strip():
-                                keywords_acumuladas.add(kw.strip())
-
-                    # Financiamiento
-                    if r.funding_source:
-                        for fn in r.funding_source:
-                            if fn and fn.strip():
-                                financiamiento_acumulado.add(fn.strip())
-
-                    # Derechos de acceso (Open Access, Closed, etc.)
-                    if not derechos_acceso and r.derechos_acceso:
-                        derechos_acceso = r.derechos_acceso.strip()
-
-                    # Guardar respuesta resumida para respaldo
-                    raw_responses.append({
-                        "source": r.source,
-                        "title": r.title,
-                        "doi": r.doi,
-                        "has_abstract": bool(r.abstract),
-                        "keywords_count": len(r.keywords) if r.keywords else 0,
-                        "derechos_acceso": r.derechos_acceso
-                    })
-
-                # Actualizar campos del registro
-                if abstract_encontrado:
-                    item.abstract_enriquecido = abstract_encontrado
-                if keywords_acumuladas:
-                    item.palabras_clave = list(keywords_acumuladas)
-                if financiamiento_acumulado:
-                    item.fuente_financiamiento = list(financiamiento_acumulado)
-                if derechos_acceso:
-                    item.derechos_acceso = derechos_acceso
-                if doi_encontrado and not item.doi:
-                    item.doi = doi_encontrado
-
-                item.fuente_enriquecimiento = ", ".join(sorted(fuentes_utilizadas)) if fuentes_utilizadas else None
-                item.metadatos_recuperados = {"fuentes_consultadas": list(fuentes_utilizadas), "respuestas": raw_responses}
-                item.estado = "ENRIQUECIDO_FUENTES"
-            else:
-                item.estado = "NO_ENCONTRADO"
+            item_uuid = uuid.uuid4()
+            try:
+                res_ms1 = await self.ms1_client.retrieve(item_id=item_uuid, doi=item.doi, title=item.titulo)
+                consolidated = res_ms1.get("consolidated", {})
+                best_source = res_ms1.get("best_source")
+                if consolidated.get("abstract"):
+                    abstract_encontrado = str(consolidated["abstract"]).strip()
+                if consolidated.get("author_keywords"):
+                    kw_list = consolidated["author_keywords"]
+                    if isinstance(kw_list, list):
+                        keywords_acumuladas.update([str(k).strip() for k in kw_list if str(k).strip()])
+                    elif isinstance(kw_list, str):
+                        keywords_acumuladas.add(kw_list.strip())
+                if consolidated.get("funding_agency"):
+                    financiamiento_acumulado.add(str(consolidated["funding_agency"]).strip())
+                if consolidated.get("oa_status"):
+                    derechos_acceso = str(consolidated["oa_status"]).strip()
+                if consolidated.get("doi") and not item.doi:
+                    doi_encontrado = str(consolidated["doi"]).strip()
+                if best_source:
+                    fuentes_utilizadas.add(best_source)
+            except Exception as e_ms1:
+                print(f"[EnrichmentService] Error consultando MS1: {e_ms1}")
 
             # ----------------------------------------------------
-            # FASE 2: Clasificación Temática con IA (Ollama / LLM)
+            # FASE 2: Clasificación Temática con IA vía MS2
             # ----------------------------------------------------
             if classify_with_ai:
-                # Usamos el abstract recién enriquecido, o el resumen original existente
-                abstract_para_llm = item.abstract_enriquecido or item.resumen_original
-                
-                # Para clasificar necesitamos al menos título o abstract
+                abstract_para_llm = abstract_encontrado or item.abstract_enriquecido or item.resumen_original
                 if item.titulo or abstract_para_llm:
-                    articulo_sintetico = MetadataResponse(
-                        title=item.titulo or "Sin título",
-                        authors=[],
-                        doi=item.doi,
-                        abstract=abstract_para_llm,
-                        keywords=list(keywords_acumuladas) if keywords_acumuladas else None,
-                        source="internal"
-                    )
-
-                    # 2.1 Clasificación OCDE
                     try:
-                        res_ocde = await self.classification_service.classify_metadata_ocde(articulo_sintetico)
-                        if res_ocde and res_ocde.clasificaciones:
-                            item.area_ocde = [
-                                c.model_dump() if hasattr(c, "model_dump") else c.dict()
-                                for c in res_ocde.clasificaciones
-                            ]
-                    except Exception as e_ocde:
-                        print(f"Error clasificando OCDE para {item.dspace_uuid}: {e_ocde}")
+                        res_ms2 = await self.ms2_client.classify(
+                            item_id=item_uuid,
+                            title=item.titulo,
+                            abstract=abstract_para_llm,
+                            keywords=", ".join(keywords_acumuladas) if keywords_acumuladas else None
+                        )
+                        if res_ms2.get("area_ocde"):
+                            item.area_ocde = res_ms2["area_ocde"] if isinstance(res_ms2["area_ocde"], list) else [res_ms2["area_ocde"]]
+                        if res_ms2.get("area_ods"):
+                            item.area_ods = res_ms2["area_ods"] if isinstance(res_ms2["area_ods"], list) else [res_ms2["area_ods"]]
+                    except Exception as e_ms2:
+                        print(f"[EnrichmentService] Error consultando MS2: {e_ms2}")
 
-                    # 2.2 Clasificación ODS
-                    try:
-                        res_ods = await self.classification_service.classify_metadata_ods(articulo_sintetico)
-                        if res_ods and res_ods.clasificaciones:
-                            item.area_ods = [
-                                c.model_dump() if hasattr(c, "model_dump") else c.dict()
-                                for c in res_ods.clasificaciones
-                            ]
-                    except Exception as e_ods:
-                        print(f"Error clasificando ODS para {item.dspace_uuid}: {e_ods}")
+            # Actualizar campos consolidados del registro
+            if abstract_encontrado:
+                item.abstract_enriquecido = abstract_encontrado
+            if keywords_acumuladas:
+                item.palabras_clave = list(keywords_acumuladas)
+            if financiamiento_acumulado:
+                item.fuente_financiamiento = list(financiamiento_acumulado)
+            if derechos_acceso:
+                item.derechos_acceso = derechos_acceso
+            if doi_encontrado and not item.doi:
+                item.doi = doi_encontrado
+            if fuentes_utilizadas:
+                item.fuente_enriquecimiento = ", ".join(sorted(fuentes_utilizadas))
 
-                    # Si se obtuvo clasificación con IA
-                    if item.area_ocde or item.area_ods:
-                        if item.estado == "ENRIQUECIDO_FUENTES":
-                            item.estado = "COMPLETO"
-                        elif item.estado == "NO_ENCONTRADO":
-                            item.estado = "CLASIFICADO_LLM"
+            if abstract_encontrado or keywords_acumuladas or item.area_ocde or item.area_ods or item.abstract_enriquecido:
+                item.estado = "ENRIQUECIDO"
+            else:
+                item.estado = "EN_PROCESO"
 
             item.mensaje_error = None
 
@@ -350,6 +284,13 @@ class EnrichmentService:
                 ya_clasificados += 1
 
         # 3. Generar el archivo Excel
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+            from openpyxl.utils import get_column_letter
+        except ImportError:
+            raise RuntimeError("openpyxl no está instalado en el entorno. Instálalo con `pip install openpyxl` para exportar a Excel.")
+
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Muestra VRIIC"

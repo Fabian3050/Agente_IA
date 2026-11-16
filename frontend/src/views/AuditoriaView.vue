@@ -82,7 +82,19 @@
             </tr>
           </thead>
           <tbody>
+            <tr v-if="loading">
+              <td colspan="5" class="text-center py-12 text-slate-500 text-xs">
+                <div class="inline-block w-4 h-4 border-2 border-[#00aea7] border-t-transparent rounded-full animate-spin mr-2"></div>
+                Cargando registros reales de auditoría desde MS3 Auth...
+              </td>
+            </tr>
+            <tr v-else-if="filtered.length === 0">
+              <td colspan="5" class="text-center py-12 text-slate-500 text-xs">
+                No hay registros de auditoría almacenados en la base de datos actualmente.
+              </td>
+            </tr>
             <tr
+              v-else
               v-for="row in filtered"
               :key="row.id"
               class="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"
@@ -200,58 +212,84 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ClipboardList, Activity, Database, ShieldCheck, Search, Download, X } from 'lucide-vue-next'
 import Card from '../components/common/Card.vue'
 import SectionHeader from '../components/common/SectionHeader.vue'
+import { auditService } from '../services/auditService'
+import { proposalService } from '../services/proposalService'
 
 const searchTerm = ref('')
 const selectedAudit = ref<any | null>(null)
+const loading = ref(true)
+const auditRecords = ref<any[]>([])
+const totalEventos = ref(0)
+const totalFuentes = ref(0)
 
-const auditRecords = [
-  {
-    id: '13458',
-    nombre: 'Machine Learning for Biodiversity in Andean Ecosystems',
-    metadatoRecuperado: 'Abstract, Áreas ODS, Palabras clave',
-    fecha: '28 jun 2024 · 09:17',
-    eventos: [
-      { time: '09:14:02', event: 'Detección de registro', user: 'Sistema CRIS', role: 'Sistema', source: 'DSpace local', result: 'ID Registro #13458 identificado sin Abstract, Áreas ODS ni Palabras clave.', color: '#6b7a90' },
-      { time: '09:14:18', event: 'Recuperación de Abstract', user: 'Agente IA', role: 'Motor IA', source: 'OpenAlex API', result: 'Abstract científico recuperado e indexado desde OpenAlex (confianza 96%).', color: '#00aea7' },
-      { time: '09:14:50', event: 'Extracción de Palabras clave', user: 'Agente IA', role: 'Motor IA', source: 'Extracción PDF', result: '6 palabras clave normalizadas extraídas mediante análisis OCR en texto completo.', color: '#1565C0' },
-      { time: '09:15:30', event: 'Clasificación en Áreas ODS', user: 'Agente IA', role: 'Motor IA', source: 'Inferencia local', result: 'ODS 15 (Vida de ecosistemas terrestres) asignado algorítmicamente.', color: '#7B1FA2' },
-      { time: '09:16:15', event: 'Validación humana de metadatos', user: 'Carlos Fuentes', role: 'Curador', source: 'Módulo de Validación', result: 'Abstract, Áreas ODS y Palabras clave validados técnicamente por el curador responsable.', color: '#00aea7' },
-      { time: '09:16:48', event: 'Aprobación humana de metadatos', user: 'María González', role: 'Administrador', source: 'Módulo de Aprobación', result: 'Metadatos aprobados en curaduría definitiva para su publicación formal en el repositorio.', color: '#F57C00' },
-      { time: '09:17:03', event: 'Sincronización de catálogo', user: 'Agente IA', role: 'Motor IA', source: 'Base de datos', result: 'Metadatos incorporados exitosamente en el registro #13458 de la base de datos local.', color: '#2E7D32' },
-    ]
-  },
-  {
-    id: '18954',
-    nombre: 'Open Science Infrastructure and Policy Frameworks in Chile',
-    metadatoRecuperado: 'Derechos de acceso, Palabras clave',
-    fecha: '28 jun 2024 · 10:45',
-    eventos: [
-      { time: '10:40:12', event: 'Detección de registro', user: 'Sistema CRIS', role: 'Sistema', source: 'DSpace local', result: 'Registro #18954 identificado con licencia de acceso y palabras clave faltantes.', color: '#6b7a90' },
-      { time: '10:41:05', event: 'Recuperación de Derechos de acceso', user: 'Agente IA', role: 'Motor IA', source: 'Crossref API', result: 'Licencia de acceso abierto Creative Commons CC BY 4.0 detectada y vinculada.', color: '#00aea7' },
-      { time: '10:42:18', event: 'Extracción de Palabras clave', user: 'Agente IA', role: 'Motor IA', source: 'Extracción PDF', result: '5 palabras clave extraídas desde el pie de página y encabezado del documento PDF.', color: '#1565C0' },
-      { time: '10:44:20', event: 'Aprobación humana de metadatos', user: 'Roberto Muñoz', role: 'Administrador', source: 'Módulo de Aprobación', result: 'Aprobación curatorial final emitida para difusión pública del registro.', color: '#F57C00' },
-    ]
-  },
-  {
-    id: '22103',
-    nombre: 'Genomic Sequencing Methods for Marine Microorganisms',
-    metadatoRecuperado: 'Área OCDE, Abstract',
-    fecha: '27 jun 2024 · 16:20',
-    eventos: [
-      { time: '16:15:00', event: 'Detección de registro', user: 'Sistema CRIS', role: 'Sistema', source: 'DSpace local', result: 'Registro #22103 detectado sin clasificación de Área OCDE ni resumen científico.', color: '#6b7a90' },
-      { time: '16:16:30', event: 'Recuperación de Área OCDE', user: 'Agente IA', role: 'Motor IA', source: 'WoS API', result: 'Clasificación 1.06 (Biología y Ciencias Biológicas) identificada en Web of Science.', color: '#00aea7' },
-      { time: '16:19:15', event: 'Aprobación humana de metadatos', user: 'Patricia Soto', role: 'Administrador', source: 'Módulo de Aprobación', result: 'Metadatos autorizados por el curador responsable para indexación oficial.', color: '#F57C00' },
-    ]
+const loadRealAuditLogs = async () => {
+  loading.value = true
+  try {
+    const [logs, proposals] = await Promise.all([
+      auditService.getAuditLogs(),
+      proposalService.listProposals()
+    ])
+
+    totalEventos.value = logs.length
+    totalFuentes.value = 4
+
+    // Agrupar eventos por item_id
+    const grouped: Record<string, any[]> = {}
+    for (const l of logs) {
+      const key = l.item_id || 'general'
+      if (!grouped[key]) grouped[key] = []
+      grouped[key].push(l)
+    }
+
+    const items: any[] = []
+    for (const [itemId, evs] of Object.entries(grouped)) {
+      const relatedProp = proposals.find((p: any) => p.id === itemId)
+      const firstEv = evs[0]
+      const lastEv = evs[evs.length - 1]
+      const d = new Date(lastEv.timestamp)
+
+      items.push({
+        id: itemId.substring(0, 8),
+        fullId: itemId,
+        nombre: relatedProp?.title || `Registro de Enriquecimiento #${itemId.substring(0, 8)}`,
+        metadatoRecuperado: evs.map((e: any) => e.action).filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'Metadato',
+        fecha: d.toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+        eventos: evs.map((e: any) => {
+          const ed = new Date(e.timestamp)
+          const isApprove = e.action.toLowerCase().includes('aprob')
+          const isReject = e.action.toLowerCase().includes('rechaz')
+          return {
+            time: ed.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            event: e.action,
+            user: e.user_name || 'Curador VRIIC',
+            role: e.role || 'Curador',
+            source: 'MS3 Auth Auditoría',
+            result: e.new_value ? `Valor establecido: ${typeof e.new_value === 'string' ? e.new_value : JSON.stringify(e.new_value)}` : (e.rejection_reason ? `Motivo: ${e.rejection_reason}` : `Acción ${e.action} ejecutada.`),
+            color: isApprove ? '#2E7D32' : isReject ? '#E53935' : '#00aea7'
+          }
+        })
+      })
+    }
+
+    auditRecords.value = items
+  } catch (err) {
+    console.error('Error cargando registros reales de auditoría:', err)
+  } finally {
+    loading.value = false
   }
-]
+}
+
+onMounted(() => {
+  loadRealAuditLogs()
+})
 
 const filtered = computed(() => {
-  return auditRecords.filter(r =>
-    r.id.includes(searchTerm.value) ||
+  return auditRecords.value.filter(r =>
+    r.id.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
     r.nombre.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
     r.metadatoRecuperado.toLowerCase().includes(searchTerm.value.toLowerCase())
   )

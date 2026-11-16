@@ -23,7 +23,7 @@ class Role(Base):
     name = Column(String(50), unique=True, nullable=False)       # 'Academico', 'Curador_VRIIC', 'Admin'
     description = Column(String(255), nullable=True)
 
-    users = relationship("User", back_populates="role")
+    users = relationship(lambda: User, back_populates="role", overlaps="role,users")
 
 
 class User(Base):
@@ -41,8 +41,8 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     last_login = Column(DateTime, nullable=True)
 
-    role = relationship("Role", back_populates="users")
-    audit_logs = relationship("AuditLog", back_populates="user")
+    role = relationship(lambda: Role, back_populates="users", overlaps="role,users")
+    audit_logs = relationship(lambda: AuditLog, back_populates="user", overlaps="audit_logs,user")
 
 
 class AuditLog(Base):
@@ -62,7 +62,7 @@ class AuditLog(Base):
     rejection_reason = Column(Text, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
-    user = relationship("User", back_populates="audit_logs")
+    user = relationship(lambda: User, back_populates="audit_logs", overlaps="audit_logs,user")
 
 
 # =============================================================================

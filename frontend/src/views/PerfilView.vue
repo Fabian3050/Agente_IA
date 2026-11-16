@@ -14,18 +14,18 @@
         >
           {{ userInitials }}
         </div>
-        <h3 class="text-base font-semibold text-[#1a2332]">{{ user?.fullName || 'Fabián Escobedo' }}</h3>
-        <p class="text-xs text-[#6b7a90] mb-2">{{ user?.email || 'admin.vriic@usach.cl' }}</p>
+        <h3 class="text-base font-semibold text-[#1a2332]">{{ user?.fullName || user?.name || 'Usuario Autenticado' }}</h3>
+        <p class="text-xs text-[#6b7a90] mb-2">{{ user?.email || 'usuario@usach.cl' }}</p>
         <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#e0f7f6] text-[#007a75] border border-[#99e8e6]">
-          {{ user?.role || 'Administrador' }}
+          {{ user?.role || 'Curador' }}
         </span>
         <div class="mt-4 pt-4 border-t border-gray-50 grid grid-cols-2 gap-3">
           <div class="text-center">
-            <p class="text-lg font-semibold text-[#1a2332]">1.847</p>
+            <p class="text-lg font-semibold text-[#1a2332]">{{ userApprovals }}</p>
             <p class="text-[11px] text-[#6b7a90]">Aprobaciones</p>
           </div>
           <div class="text-center">
-            <p class="text-lg font-semibold text-[#1a2332]">94.2%</p>
+            <p class="text-lg font-semibold text-[#1a2332]">{{ userApprovals > 0 ? '100%' : '0%' }}</p>
             <p class="text-[11px] text-[#6b7a90]">Tasa aceptación</p>
           </div>
         </div>
@@ -39,16 +39,18 @@
             <label class="text-xs text-[#6b7a90] mb-1 block">Nombre completo</label>
             <input
               type="text"
-              :value="user?.fullName || 'Fabián Escobedo'"
+              :value="user?.fullName || user?.name || 'Usuario Institucional'"
               class="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-gray-50 text-[#1a2332]"
+              readonly
             />
           </div>
           <div>
             <label class="text-xs text-[#6b7a90] mb-1 block">Correo institucional</label>
             <input
               type="text"
-              :value="user?.email || 'admin.vriic@usach.cl'"
+              :value="user?.email || 'usuario@usach.cl'"
               class="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-gray-50 text-[#1a2332]"
+              readonly
             />
           </div>
           <div>
@@ -57,6 +59,7 @@
               type="text"
               value="Vicerrectoría de Investigación, Innovación y Creación (VRIIC)"
               class="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-gray-50 text-[#1a2332]"
+              readonly
             />
           </div>
           <div>
@@ -65,6 +68,7 @@
               type="text"
               value="Universidad de Santiago de Chile (USACH)"
               class="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-gray-50 text-[#1a2332]"
+              readonly
             />
           </div>
         </div>
@@ -74,13 +78,7 @@
             class="px-4 py-2 text-xs font-medium text-white rounded-lg hover:opacity-90 cursor-pointer"
             style="background: #00aea7"
           >
-            Guardar cambios
-          </button>
-          <button
-            @click="changePassword"
-            class="px-4 py-2 text-xs font-medium border border-gray-200 text-[#6b7a90] rounded-lg hover:bg-gray-50 cursor-pointer"
-          >
-            Cambiar contraseña
+            Actualizar perfil
           </button>
         </div>
       </Card>
@@ -112,14 +110,26 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import Card from '../components/common/Card.vue'
 import SectionHeader from '../components/common/SectionHeader.vue'
+import { proposalService } from '../services/proposalService'
 import type { User } from '../types'
 
 const props = defineProps<{
   user: User | null
 }>()
+
+const userApprovals = ref(0)
+
+onMounted(async () => {
+  try {
+    const list = await proposalService.listProposals({ state: 'Aprobada' })
+    userApprovals.value = list.length
+  } catch {
+    userApprovals.value = 0
+  }
+})
 
 const userInitials = computed(() => {
   const name = props.user?.fullName || 'FE'

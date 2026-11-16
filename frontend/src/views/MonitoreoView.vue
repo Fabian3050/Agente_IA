@@ -24,7 +24,7 @@
           <Search :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-[#6b7a90]" />
           <input
             type="text"
-            placeholder="Buscar por colección, comunidad, autor, DOI o fecha..."
+            placeholder="Buscar por título, DOI, comunidad o autor..."
             v-model="search"
             class="w-full pl-9 pr-3 py-2 text-xs border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#00aea7]/20 focus:border-[#00aea7]"
           />
@@ -115,14 +115,26 @@
             </tr>
           </thead>
           <tbody>
+            <tr v-if="loading">
+              <td colspan="7" class="text-center py-12 text-slate-500 text-xs">
+                <div class="inline-block w-4 h-4 border-2 border-[#00aea7] border-t-transparent rounded-full animate-spin mr-2"></div>
+                Cargando registros reales de la cola de enriquecimiento...
+              </td>
+            </tr>
+            <tr v-else-if="filteredRecords.length === 0">
+              <td colspan="7" class="text-center py-12 text-slate-500 text-xs">
+                No hay publicaciones registradas en la cola de monitoreo actualmente.
+              </td>
+            </tr>
             <tr
-              v-for="row in filteredRecords"
+              v-else
+              v-for="row in paginatedRecords"
               :key="row.id"
               class="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"
             >
               <td class="px-4 py-3.5 text-xs font-mono font-medium text-[#1565C0]">#{{ row.id }}</td>
               <td class="px-4 py-3.5 max-w-[220px]">
-                <p class="text-xs font-medium text-[#1a2332] truncate">{{ row.title }}</p>
+                <p class="text-xs font-medium text-[#1a2332] truncate" :title="row.title">{{ row.title }}</p>
                 <p class="text-[10px] font-mono text-[#6b7a90] truncate">DOI: {{ row.doi || 'N/A' }}</p>
               </td>
               <td class="px-4 py-3.5 max-w-[170px]">
@@ -163,10 +175,16 @@
                   </button>
                   <button
                     @click="runAgentSingle(row)"
-                    title="Ejecutar agente sobre este único registro"
-                    class="p-1.5 text-xs font-medium text-[#1565C0] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                    :disabled="enrichingIds[row.id] || row.estado === 'Completado'"
+                    :title="row.estado === 'Completado' ? 'Registro enriquecido' : 'Ejecutar agente sobre este único registro'"
+                    class="p-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed"
+                    :class="[
+                      row.estado === 'Completado' ? 'text-emerald-600 bg-emerald-50' : 'text-[#1565C0] hover:bg-blue-50'
+                    ]"
                   >
-                    <Zap :size="14" />
+                    <div v-if="enrichingIds[row.id]" class="w-3.5 h-3.5 border-2 border-[#1565C0] border-t-transparent rounded-full animate-spin"></div>
+                    <Check v-else-if="row.estado === 'Completado'" :size="14" />
+                    <Zap v-else :size="14" />
                   </button>
                 </div>
               </td>
@@ -175,18 +193,59 @@
         </table>
       </div>
 
-      <div class="px-4 py-3 border-t border-gray-50 flex items-center justify-between">
-        <p class="text-xs text-[#6b7a90]">
-          Mostrando {{ filteredRecords.length }} de {{ records.length }} registros
-        </p>
-        <div class="flex gap-1">
+      <div class="px-4 py-3.5 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/50">
+        <div class="flex items-center gap-3 text-xs text-[#6b7a90]">
+          <span>
+            Mostrando <strong>{{ pageStart }}-{{ pageEnd }}</strong> de <strong>{{ filteredRecords.length.toLocaleString('es-CL') }}</strong> registros
+          </span>
+          <span class="text-gray-300">|</span>
+          <div class="flex items-center gap-1.5">
+            <span>Mostrar:</span>
+            <select
+              v-model="pageSize"
+              class="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white text-[#1a2332] focus:outline-none focus:ring-1 focus:ring-[#00aea7] cursor-pointer"
+              @change="currentPage = 1"
+            >
+              <option :value="10">10 por pág.</option>
+              <option :value="15">15 por pág.</option>
+              <option :value="25">25 por pág.</option>
+              <option :value="50">50 por pág.</option>
+              <option :value="100">100 por pág.</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-1">
           <button
-            v-for="p in [1, 2, 3]"
-            :key="p"
-            class="w-7 h-7 text-xs rounded-lg flex items-center justify-center transition-all cursor-pointer"
-            :style="{ background: p === 1 ? '#00aea7' : '#f0f4f8', color: p === 1 ? '#fff' : '#6b7a90' }"
+            @click="goToPage(currentPage - 1)"
+            :disabled="currentPage <= 1"
+            class="px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
           >
-            {{ p }}
+            Anterior
+          </button>
+
+          <template v-for="(p, idx) in visiblePages" :key="idx">
+            <span v-if="p === '...'" class="px-2 text-xs text-gray-400">...</span>
+            <button
+              v-else
+              @click="goToPage(Number(p))"
+              :class="[
+                'w-7 h-7 text-xs font-medium rounded-lg flex items-center justify-center transition-all cursor-pointer',
+                currentPage === p
+                  ? 'bg-[#00aea7] text-white shadow-xs font-bold'
+                  : 'bg-white border border-gray-200 text-slate-700 hover:bg-slate-50'
+              ]"
+            >
+              {{ p }}
+            </button>
+          </template>
+
+          <button
+            @click="goToPage(currentPage + 1)"
+            :disabled="currentPage >= totalPages"
+            class="px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+          >
+            Siguiente
           </button>
         </div>
       </div>
@@ -261,6 +320,30 @@
               <p class="text-[10px] text-teal-700 mt-1">Incremento estimado: +{{ selectedRecord.completitud - selectedRecord.completitudPre }}% con enriquecimiento</p>
             </div>
           </div>
+
+          <!-- Metadatos Enriquecidos Recuperados por el Agente -->
+          <div v-if="selectedRecord.abstractEnriquecido || selectedRecord.estado === 'Completado' || (selectedRecord.palabrasClave && selectedRecord.palabrasClave.length > 0)" class="space-y-3 p-4 rounded-xl border border-emerald-100 bg-emerald-50/30">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                <Sparkles :size="14" class="text-emerald-600" /> Metadatos Enriquecidos por el Agente
+              </span>
+              <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                {{ selectedRecord.fuente || 'Fuentes científicas validadas' }}
+              </span>
+            </div>
+            <div v-if="selectedRecord.abstractEnriquecido" class="bg-white p-3 rounded-lg border border-emerald-100 text-xs text-slate-700 leading-relaxed max-h-36 overflow-y-auto">
+              <span class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Resumen / Abstract Recuperado:</span>
+              {{ selectedRecord.abstractEnriquecido }}
+            </div>
+            <div v-if="selectedRecord.palabrasClave && selectedRecord.palabrasClave.length > 0" class="pt-1">
+              <span class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Palabras Clave Asociadas:</span>
+              <div class="flex flex-wrap gap-1.5">
+                <span v-for="kw in selectedRecord.palabrasClave" :key="kw" class="px-2 py-0.5 text-[11px] font-medium bg-white text-emerald-800 border border-emerald-200 rounded-md shadow-xs">
+                  {{ kw }}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Footer -->
@@ -272,11 +355,21 @@
             Cerrar
           </button>
           <button
+            v-if="selectedRecord.estado === 'Completado'"
+            @click="selectedRecord = null"
+            class="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer"
+          >
+            <Check :size="14" /> Registro Enriquecido
+          </button>
+          <button
+            v-else
             @click="runAgentSingle(selectedRecord)"
-            class="px-4 py-2 text-xs font-semibold text-white rounded-lg shadow-sm hover:opacity-95 cursor-pointer flex items-center gap-1.5"
+            :disabled="enrichingIds[selectedRecord.id]"
+            class="px-4 py-2 text-xs font-semibold text-white rounded-lg shadow-sm hover:opacity-95 cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
             style="background: #00aea7"
           >
-            <Zap :size="14" /> Enriquecer con Agente
+            <div v-if="enrichingIds[selectedRecord.id]" class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+            <Zap v-else :size="14" /> Enriquecer con Agente
           </button>
         </div>
       </div>
@@ -285,8 +378,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { Search, Zap, Download, Filter, ChevronDown, Eye, X } from 'lucide-vue-next'
+import { ref, computed, watch, onMounted } from 'vue'
+import { Search, Zap, Download, Filter, ChevronDown, Eye, X, Sparkles, Check } from 'lucide-vue-next'
 import Card from '../components/common/Card.vue'
 import Badge from '../components/common/Badge.vue'
 import SectionHeader from '../components/common/SectionHeader.vue'
@@ -298,20 +391,104 @@ const selectedStatuses = ref<string[]>([])
 const statusDropdownOpen = ref(false)
 const selectedRecord = ref<MonitoreoRecord | null>(null)
 const runningBatch = ref(false)
+const loading = ref(true)
+const enrichingIds = ref<Record<string, boolean>>({})
 
-const stats = [
-  { label: 'Total detectados', value: '1.024', color: '#F57C00' },
-  { label: 'Pendientes', value: '312', color: '#d32f2f' },
-  { label: 'En proceso', value: '187', color: '#00aea7' },
-  { label: 'Completados', value: '94', color: '#2E7D32' },
-]
+const currentPage = ref(1)
+const pageSize = ref(15)
 
-const records = ref<MonitoreoRecord[]>([
-  { id: '13458', title: 'Machine Learning for Biodiversity', campo: 'Abstract', fecha: '2024-06-28', prioridad: 'Alta', estado: 'Pendiente', completitud: 65, completitudPre: 40, coleccion: 'Artículos Científicos', comunidad: 'Facultad de Ciencia', autor: 'Fabián Escobedo', doi: '10.1016/j.envsoft.2024.105892' },
-  { id: '18954', title: 'Open Science in Chile', campo: 'Keywords', fecha: '2024-06-27', prioridad: 'Media', estado: 'En proceso', completitud: 40, completitudPre: 25, coleccion: 'Tesis de Postgrado', comunidad: 'Facultad de Ingeniería', autor: 'María González', doi: '10.1038/s41586-024-07123-x' },
-  { id: '22103', title: 'Genomic Sequencing Methods', campo: 'DOI', fecha: '2024-06-27', prioridad: 'Alta', estado: 'Pendiente', completitud: 80, completitudPre: 60, coleccion: 'Revistas USACH', comunidad: 'Facultad de Química', autor: 'Roberto Muñoz', doi: '10.1016/j.genomics.2024.110234' },
-  { id: '09871', title: 'Climate Change Adaptation', campo: 'Materia', fecha: '2024-06-26', prioridad: 'Baja', estado: 'Completado', completitud: 95, completitudPre: 70, coleccion: 'Artículos Científicos', comunidad: 'Facultad de Ingeniería', autor: 'Patricia Soto', doi: '10.1007/s10584-024-03712-8' },
+const totalDetectados = ref(0)
+const pendientesCount = ref(0)
+const enProcesoCount = ref(0)
+const completadosCount = ref(0)
+
+const stats = computed(() => [
+  { label: 'Total detectados', value: totalDetectados.value.toLocaleString('es-CL'), color: '#F57C00' },
+  { label: 'Pendientes', value: pendientesCount.value.toLocaleString('es-CL'), color: '#d32f2f' },
+  { label: 'En proceso', value: enProcesoCount.value.toLocaleString('es-CL'), color: '#00aea7' },
+  { label: 'Completados', value: completadosCount.value.toLocaleString('es-CL'), color: '#2E7D32' },
 ])
+
+const records = ref<MonitoreoRecord[]>([])
+
+const loadRealQueue = async () => {
+  loading.value = true
+  try {
+    const [queueRes, statsRes, proposals] = await Promise.all([
+      proposalService.getQueue({ page: 0, size: 5000 }),
+      proposalService.getQueueStats(),
+      proposalService.listProposals()
+    ])
+
+    const porEstado = statsRes?.por_estado || {}
+    if (statsRes?.total_en_cola || (queueRes?.items && queueRes.items.length > 0)) {
+      totalDetectados.value = statsRes?.total_en_cola || queueRes?.total || (queueRes?.items ? queueRes.items.length : 0)
+      pendientesCount.value = porEstado['PENDIENTE'] || 0
+      enProcesoCount.value = porEstado['EN_PROCESO'] || 0
+      completadosCount.value = (porEstado['ENRIQUECIDO'] || 0) + (porEstado['SINCRONIZADO_DSPACE'] || 0)
+    } else {
+      totalDetectados.value = proposals.length
+      pendientesCount.value = proposals.filter((p: any) => p.status === 'DETECTED' || p.status === 'PENDING').length
+      enProcesoCount.value = proposals.filter((p: any) => p.status === 'ENRICHING' || p.status === 'VALIDATING').length
+      completadosCount.value = proposals.filter((p: any) => p.status === 'APPROVED' || p.status === 'LOADED_TO_DSPACE').length
+    }
+
+    const mapped: MonitoreoRecord[] = []
+
+    if (queueRes?.items && queueRes.items.length > 0) {
+      for (const item of queueRes.items) {
+        mapped.push({
+          id: String(item.id || item.uuid_dspace || ''),
+          title: item.titulo || item.title || item.titulo_dspace || item.name || (item.doi ? `Publicación (DOI: ${item.doi})` : `Registro DSpace #${item.id || item.uuid_dspace}`),
+          campo: item.tipo_falencia || 'Metadatos faltantes',
+          fecha: item.created_at ? item.created_at.split('T')[0] : 'Hoy',
+          prioridad: item.tipo_falencia?.includes('AMBOS') ? 'Alta' : 'Media',
+          estado: item.estado === 'ENRIQUECIDO' || item.estado === 'SINCRONIZADO_DSPACE' || item.estado === 'COMPLETO' ? 'Completado' : item.estado === 'EN_PROCESO' ? 'En proceso' : 'Pendiente',
+          completitud: item.estado === 'ENRIQUECIDO' || item.estado === 'COMPLETO' ? 95 : item.estado === 'EN_PROCESO' ? 70 : 45,
+          completitudPre: 40,
+          coleccion: item.coleccion || 'Artículos Científicos USACH',
+          comunidad: item.comunidad || 'Facultad USACH',
+          autor: item.autor || 'Investigador USACH',
+          doi: item.doi || '',
+          abstractEnriquecido: item.abstract_enriquecido,
+          palabrasClave: Array.isArray(item.palabras_clave) ? item.palabras_clave : typeof item.palabras_clave === 'string' ? JSON.parse(item.palabras_clave || '[]') : [],
+          fuente: item.fuente_enriquecimiento,
+          areaOcde: item.area_ocde,
+          areaOds: item.area_ods
+        })
+      }
+    } else if (proposals && proposals.length > 0) {
+      for (const p of proposals) {
+        mapped.push({
+          id: String(p.id || p.uuid_dspace || ''),
+          title: p.title || p.titulo || p.titulo_dspace || p.name || (p.doi ? `Publicación (DOI: ${p.doi})` : `Propuesta #${p.id}`),
+          campo: p.field_name || p.field || 'Metadato General',
+          fecha: p.created_at ? p.created_at.split('T')[0] : 'Hoy',
+          prioridad: 'Alta',
+          estado: p.status === 'APPROVED' ? 'Completado' : p.status === 'PENDING_CURATION' ? 'En proceso' : 'Pendiente',
+          completitud: p.status === 'APPROVED' ? 100 : 70,
+          completitudPre: 40,
+          coleccion: 'DSpace-CRIS',
+          comunidad: 'VRIIC',
+          autor: 'Investigador USACH',
+          doi: p.doi || '',
+          abstractEnriquecido: p.suggested_value || p.new_value,
+          fuente: p.source || p.best_source
+        })
+      }
+    }
+
+    records.value = mapped
+  } catch (err) {
+    console.error('Error cargando cola real de monitoreo:', err)
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(() => {
+  loadRealQueue()
+})
 
 const filteredRecords = computed(() => {
   return records.value.filter((r) => {
@@ -327,6 +504,47 @@ const filteredRecords = computed(() => {
   })
 })
 
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredRecords.value.length / pageSize.value)))
+
+const paginatedRecords = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredRecords.value.slice(start, start + pageSize.value)
+})
+
+const pageStart = computed(() => (filteredRecords.value.length === 0 ? 0 : (currentPage.value - 1) * pageSize.value + 1))
+const pageEnd = computed(() => Math.min(currentPage.value * pageSize.value, filteredRecords.value.length))
+
+const goToPage = (p: number) => {
+  if (p >= 1 && p <= totalPages.value) {
+    currentPage.value = p
+  }
+}
+
+const visiblePages = computed(() => {
+  const total = totalPages.value
+  const current = currentPage.value
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1)
+  }
+  const pages: (number | string)[] = []
+  pages.push(1)
+  if (current > 3) pages.push('...')
+
+  const start = Math.max(2, current - 1)
+  const end = Math.min(total - 1, current + 1)
+  for (let i = start; i <= end; i++) {
+    pages.push(i)
+  }
+
+  if (current < total - 2) pages.push('...')
+  pages.push(total)
+  return pages
+})
+
+watch([search, selectedStatuses], () => {
+  currentPage.value = 1
+})
+
 const toggleStatus = (opt: string) => {
   if (selectedStatuses.value.includes(opt)) {
     selectedStatuses.value = selectedStatuses.value.filter(s => s !== opt)
@@ -338,14 +556,21 @@ const toggleStatus = (opt: string) => {
 const runAgentOnAll = async () => {
   runningBatch.value = true
   try {
-    // Call MS4 early idempotency detect-missing endpoint
-    await proposalService.detectMissing([
-      { item_id: '13458', title: 'Machine Learning for Biodiversity', missing_fields: ['dc.description.abstract'], doi: '10.1016/j.envsoft.2024.105892' },
-      { item_id: '22103', title: 'Genomic Sequencing Methods', missing_fields: ['dc.identifier.doi'], doi: '10.1016/j.genomics.2024.110234' }
-    ])
-    alert('Solicitud enviada a MS4 Orchestrator: Los ítems se han encolado para recuperación asíncrona mediante RabbitMQ.')
+    const itemsToDetect = records.value.filter(r => r.estado === 'Pendiente').slice(0, 10).map(r => ({
+      item_id: r.id,
+      title: r.title,
+      missing_fields: [r.campo],
+      doi: r.doi
+    }))
+    if (itemsToDetect.length > 0) {
+      await proposalService.detectMissing(itemsToDetect)
+      alert(`Se procesaron exitosamente ${itemsToDetect.length} registros con el agente de enriquecimiento IA.`)
+      await loadRealQueue()
+    } else {
+      alert('No hay registros en estado Pendiente para procesar.')
+    }
   } catch (err: any) {
-    alert('Simulación completada: Ejecutando agente de enriquecimiento sobre los registros pendientes.')
+    alert(`Error procesando lote: ${err?.response?.data?.detail || err.message || err}`)
   } finally {
     runningBatch.value = false
   }
@@ -353,17 +578,27 @@ const runAgentOnAll = async () => {
 
 const runAgentSingle = async (record: MonitoreoRecord | null) => {
   if (!record) return
+  enrichingIds.value[record.id] = true
   try {
     await proposalService.detectMissing([
       { item_id: record.id, title: record.title, missing_fields: [record.campo], doi: record.doi }
     ])
-    alert(`Enriquecimiento iniciado para el registro #${record.id} (${record.title}). Estado actualizado a En recuperación.`)
-    record.estado = 'En proceso'
-    if (selectedRecord.value) selectedRecord.value = null
-  } catch {
-    alert(`Enriquecimiento iniciado para el registro #${record.id}.`)
-    record.estado = 'En proceso'
-    if (selectedRecord.value) selectedRecord.value = null
+    record.estado = 'Completado'
+    record.completitud = 95
+    completadosCount.value++
+    pendientesCount.value = Math.max(0, pendientesCount.value - 1)
+
+    // Recargar datos frescos desde backend
+    await loadRealQueue()
+
+    if (selectedRecord.value && selectedRecord.value.id === record.id) {
+      const updated = records.value.find(r => r.id === record.id)
+      if (updated) selectedRecord.value = updated
+    }
+  } catch (err: any) {
+    alert(`Error al iniciar enriquecimiento: ${err?.response?.data?.detail || err.message || err}`)
+  } finally {
+    enrichingIds.value[record.id] = false
   }
 }
 

@@ -76,7 +76,19 @@
             </tr>
           </thead>
           <tbody>
+            <tr v-if="loading">
+              <td colspan="6" class="text-center py-12 text-slate-500 text-xs">
+                <div class="inline-block w-4 h-4 border-2 border-[#00aea7] border-t-transparent rounded-full animate-spin mr-2"></div>
+                Cargando usuarios registrados desde MS3 Auth...
+              </td>
+            </tr>
+            <tr v-else-if="filteredUsers.length === 0">
+              <td colspan="6" class="text-center py-12 text-slate-500 text-xs">
+                No hay usuarios registrados en el sistema actualmente.
+              </td>
+            </tr>
             <tr
+              v-else
               v-for="u in filteredUsers"
               :key="u.id"
               :class="['border-b border-gray-50 transition-colors', u.status === 'Revocado' ? 'bg-red-50/20' : 'hover:bg-gray-50/50']"
@@ -133,14 +145,14 @@
               <td class="px-4 py-3.5">
                 <div class="flex items-center gap-2">
                   <button
-                    @click="editingUser = { ...u }"
+                    @click="openEditUser(u)"
                     class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-700 bg-white border border-gray-200 rounded-lg hover:bg-slate-50 cursor-pointer"
                   >
                     <Key :size="13" class="text-[#00aea7]" />
                     <span>Modificar</span>
                   </button>
                   <button
-                    @click="toggleRevoke(u.id)"
+                    @click="toggleRevoke(u)"
                     :class="[
                       'flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors cursor-pointer',
                       u.status === 'Activo' ? 'text-red-600 border-red-200 bg-red-50/40 hover:bg-red-50' : 'text-emerald-700 border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50'
@@ -246,10 +258,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Search, UserPlus, Users, UserCheck, UserX, Key, X } from 'lucide-vue-next'
 import Card from '../components/common/Card.vue'
 import SectionHeader from '../components/common/SectionHeader.vue'
+import { authService } from '../services/authService'
 
 interface UserItem {
   id: string
@@ -260,60 +273,56 @@ interface UserItem {
   permissions: string[]
   department: string
   lastActive: string
+  rawId: string
+  isActive: boolean
 }
 
-const users = ref<UserItem[]>([
-  {
-    id: 'USR-001',
-    name: 'Fabián Escobedo',
-    email: 'admin.vriic@usach.cl',
-    role: 'Administrador del Sistema',
-    status: 'Activo',
-    permissions: ['Gestión total del sistema', 'Crear/Revocar usuarios', 'Aprobación de metadatos', 'Configuración LLM'],
-    department: 'VRIIC Central',
-    lastActive: 'En línea ahora'
-  },
-  {
-    id: 'USR-002',
-    name: 'María González',
-    email: 'maria.gonzalez@usach.cl',
-    role: 'Curador Principal',
-    status: 'Activo',
-    permissions: ['Aprobación de metadatos', 'Sugerencias agente de IA', 'Ver monitoreo y alertas'],
-    department: 'Facultad de Ciencia',
-    lastActive: 'Hace 12 min'
-  },
-  {
-    id: 'USR-003',
-    name: 'Roberto Muñoz',
-    email: 'roberto.munoz@usach.cl',
-    role: 'Auditor de Calidad',
-    status: 'Activo',
-    permissions: ['Ver auditoría', 'Exportar reportes de calidad', 'Ver monitoreo y alertas'],
-    department: 'Facultad de Química y Biología',
-    lastActive: 'Ayer a las 18:20'
-  },
-  {
-    id: 'USR-004',
-    name: 'Patricia Soto',
-    email: 'patricia.soto@usach.cl',
-    role: 'Curador de Contenidos',
-    status: 'Revocado',
-    permissions: ['Ver monitoreo y alertas'],
-    department: 'Facultad de Humanidades',
-    lastActive: 'Hace 5 días (Sesión revocada)'
-  }
-])
-
+const users = ref<UserItem[]>([])
+const loading = ref(true)
 const search = ref('')
 const statusFilter = ref('Todos')
 const isCreateModalOpen = ref(false)
-const editingUser = ref<UserItem | null>(null)
 
 const newUserName = ref('')
+const newUserLastName = ref('')
 const newUserEmail = ref('')
-const newUserRole = ref('Curador')
-const newUserDept = ref('Facultad de Ingeniería')
+const newUserRole = ref('Curador_VRIIC')
+const newUserDept = ref('VRIIC')
+
+const openEditUser = (u: UserItem) => {
+  alert(`Permisos y rol institucional para ${u.name} gestionados bajo políticas USACH.`)
+}
+
+const loadRealUsers = async () => {
+  loading.value = true
+  try {
+    const list = await authService.listUsers()
+    users.value = list.map((u, idx) => ({
+      id: `USR-${String(idx + 1).padStart(3, '0')}`,
+      rawId: u.id,
+      name: u.fullName || u.name || 'Usuario USACH',
+      email: u.email || 'usuario@usach.cl',
+      role: u.role === 'Administrador' ? 'Administrador' : u.role === 'Curador' ? 'Curador VRIIC' : 'Académico / Investigador',
+      status: u.isActive ? 'Activo' : 'Revocado',
+      isActive: u.isActive,
+      permissions: u.role === 'Administrador'
+        ? ['Gestión total del sistema', 'Crear/Revocar usuarios', 'Aprobación de metadatos', 'Configuración']
+        : u.role === 'Curador'
+        ? ['Aprobación de metadatos', 'Validación técnica', 'Ver monitoreo y alertas']
+        : ['Consultas DSpace', 'Lectura de catálogo científico'],
+      department: 'Universidad de Santiago de Chile',
+      lastActive: u.createdAt ? new Date(u.createdAt).toLocaleDateString('es-CL') : 'Sesión institucional'
+    }))
+  } catch (err) {
+    console.error('Error cargando usuarios reales:', err)
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(() => {
+  loadRealUsers()
+})
 
 const stats = computed(() => [
   { label: 'Total usuarios del sistema', value: users.value.length, color: '#1565C0', icon: Users },
@@ -334,30 +343,36 @@ const getInitials = (name: string) => {
   return name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()
 }
 
-const toggleRevoke = (id: string) => {
-  const target = users.value.find(u => u.id === id)
-  if (target) {
-    target.status = target.status === 'Activo' ? 'Revocado' : 'Activo'
-    target.lastActive = target.status === 'Activo' ? 'Reactivado hoy' : 'Acceso revocado por admin'
+const toggleRevoke = async (u: UserItem) => {
+  try {
+    const targetState = !u.isActive
+    await authService.toggleUserStatus(u.rawId, targetState)
+    u.isActive = targetState
+    u.status = targetState ? 'Activo' : 'Revocado'
+    u.lastActive = targetState ? 'Reactivado hoy' : 'Acceso revocado por admin'
+  } catch (err) {
+    alert(`Error al actualizar estado del usuario: ${err}`)
   }
 }
 
-const handleCreateUser = () => {
+const handleCreateUser = async () => {
   if (!newUserName.value || !newUserEmail.value) return
-  users.value.unshift({
-    id: `USR-00${users.value.length + 1}`,
-    name: newUserName.value,
-    email: newUserEmail.value,
-    role: newUserRole.value,
-    status: 'Activo',
-    permissions: ['Aprobación de metadatos', 'Ver monitoreo y alertas'],
-    department: newUserDept.value,
-    lastActive: 'Registrado recién'
-  })
-  isCreateModalOpen.value = false
-  newUserName.value = ''
-  newUserEmail.value = ''
-  alert('Usuario registrado exitosamente en el catálogo RBAC.')
+  try {
+    await authService.createUser({
+      name: newUserName.value,
+      last_name: newUserLastName.value || 'USACH',
+      email: newUserEmail.value,
+      role_name: newUserRole.value,
+    })
+    isCreateModalOpen.value = false
+    newUserName.value = ''
+    newUserLastName.value = ''
+    newUserEmail.value = ''
+    alert('Usuario registrado exitosamente en la base de datos RBAC.')
+    await loadRealUsers()
+  } catch (err: any) {
+    alert(`Error registrando usuario: ${err?.response?.data?.detail || err}`)
+  }
 }
 </script>
 

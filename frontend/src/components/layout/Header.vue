@@ -13,7 +13,7 @@
         title="Ver notificaciones y alertas del sistema"
       >
         <Bell :size="18" class="text-[#6b7a90]" />
-        <span class="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#F57C00]" />
+        <span v-if="notifications.length > 0" class="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#F57C00]" />
       </button>
 
       <!-- Notifications Dropdown -->
@@ -22,10 +22,13 @@
         class="absolute right-36 top-12 w-80 bg-white rounded-xl shadow-xl border border-gray-100 p-4 z-50"
       >
         <div class="flex items-center justify-between pb-2 mb-2 border-b border-gray-100">
-          <span class="text-xs font-semibold text-[#1a2332]">Notificaciones recientes</span>
+          <span class="text-xs font-semibold text-[#1a2332]">Notificaciones del sistema</span>
           <span class="text-[10px] text-[#00aea7] font-medium cursor-pointer" @click="showNotifications = false">Cerrar</span>
         </div>
-        <div class="space-y-3">
+        <div v-if="notifications.length === 0" class="py-4 text-center text-xs text-gray-400">
+          No hay notificaciones ni eventos pendientes.
+        </div>
+        <div v-else class="space-y-3">
           <div
             v-for="(n, idx) in notifications"
             :key="idx"
@@ -52,7 +55,7 @@
           {{ userInitials }}
         </div>
         <div class="hidden sm:block text-left">
-          <p class="text-xs font-medium text-[#1a2332] leading-tight">{{ user?.fullName || 'Fabián Escobedo' }}</p>
+          <p class="text-xs font-medium text-[#1a2332] leading-tight">{{ user?.fullName || user?.name || 'Usuario USACH' }}</p>
           <div class="flex items-center gap-1">
             <span class="text-[10px] text-[#6b7a90]">{{ user?.role || 'Curador' }}</span>
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
@@ -73,8 +76,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Bell, LogOut } from 'lucide-vue-next'
+import { auditService } from '../../services/auditService'
 import type { Page, User } from '../../types'
 
 const props = defineProps<{
@@ -90,23 +94,31 @@ defineEmits<{
 const showNotifications = ref(false)
 
 const userInitials = computed(() => {
-  const name = props.user?.fullName || 'FE'
-  const parts = name.split(' ')
+  const name = props.user?.fullName || props.user?.name || 'US'
+  const parts = name.trim().split(' ')
   if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
   return name.slice(0, 2).toUpperCase()
 })
 
-const notifications = [
-  { text: 'Registro #18954 requiere validación humana por coincidencia dudosa', time: 'Hace 5 min', color: '#F57C00' },
-  { text: 'Proceso de extracción de PDF finalizado para 3 ítems', time: 'Hace 15 min', color: '#00aea7' },
-  { text: 'Exportación CSV en dos pasos generada con éxito (0 celdas vacías)', time: 'Hace 30 min', color: '#2E7D32' },
-]
+const notifications = ref<{ text: string; time: string; color: string }[]>([])
+
+onMounted(async () => {
+  try {
+    const logs = await auditService.getAuditLogs()
+    notifications.value = (logs || []).slice(0, 5).map(l => ({
+      text: `${l.action}${l.item_id ? ` · Ítem ${l.item_id}` : ''}${l.user_name ? ` (${l.user_name})` : ''}`,
+      time: l.timestamp ? new Date(l.timestamp).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : 'Reciente',
+      color: l.action.includes('REJECT') ? '#d32f2f' : l.action.includes('APPROV') ? '#00aea7' : '#1565C0'
+    }))
+  } catch {
+    notifications.value = []
+  }
+})
 
 const meta: Record<Page, { title: string; desc: string }> = {
   dashboard: { title: 'Dashboard', desc: 'Estadísticas generales del sistema de enriquecimiento de metadatos.' },
   monitoreo: { title: 'Monitoreo de Registros', desc: 'Supervisión de registros incompletos detectados en el repositorio DSpace-CRIS.' },
   recuperacion: { title: 'Reportes y Estadísticas de Recuperación', desc: 'Análisis integral del rendimiento del agente inteligente, consultas y conectividad con fuentes externas.' },
-  analisis: { title: 'Análisis Documental PDF', desc: 'Extracción y análisis automatizado de metadatos desde documentos científicos.' },
   validacion: { title: 'Validación Humana de Metadatos', desc: 'Revisión de los metadatos extraídos por el agente para asegurar su calidad y precisión.' },
   aprobacion: { title: 'Aprobación Humana de Metadatos', desc: 'Revisión final y decisión humana para autorizar metadatos validados previamente.' },
   auditoria: { title: 'Auditoría y Trazabilidad', desc: 'Línea temporal completa e inmutable del proceso de enriquecimiento por registro.' },

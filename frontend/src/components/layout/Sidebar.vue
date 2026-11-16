@@ -87,7 +87,6 @@
 import {
   LayoutDashboard,
   FileText,
-  BookOpen,
   ShieldCheck,
   CheckSquare,
   ClipboardList,
@@ -112,7 +111,6 @@ defineEmits<{
 const navItems = [
   { key: 'dashboard' as Page, label: 'Dashboard', icon: LayoutDashboard },
   { key: 'monitoreo' as Page, label: 'Monitoreo de registros', icon: FileText },
-  { key: 'analisis' as Page, label: 'Análisis documental PDF', icon: BookOpen },
   { key: 'validacion' as Page, label: 'Validación de metadatos', icon: ShieldCheck },
   { key: 'aprobacion' as Page, label: 'Aprobación de metadatos', icon: CheckSquare },
   { key: 'auditoria' as Page, label: 'Auditoría', icon: ClipboardList },

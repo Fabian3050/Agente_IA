@@ -10,7 +10,7 @@ from clients.unpaywall_client import search_unpaywall, get_metadata_by_doi_unpay
 
 class MetadataService:
     def __init__(self):
-        self.openalex_client = OpenAlexClient(email="agente_ia_vriic@usach.cl")
+        self.openalex_client = OpenAlexClient(email="fabian.escobedo@usach.cl")
 
     async def _search_openalex_wrapper(self, query: str, limit: int) -> List[MetadataResponse]:
         candidates = await self.openalex_client.search_candidates_by_title(title=query, limit=limit)

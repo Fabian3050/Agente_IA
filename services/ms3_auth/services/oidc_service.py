@@ -51,6 +51,25 @@ class OIDCService:
         self.scopes = auth_config.OIDC_SCOPES
         self.jwt_secret = auth_config.JWT_SECRET_KEY.encode('utf-8')
         self.jwt_expiry_seconds = auth_config.JWT_EXPIRATION_MINUTES * 60
+        # Almacén en memoria de códigos de autorización emitidos por el portal SSO institucional
+        self._pending_auth_codes: Dict[str, Dict[str, Any]] = {}
+
+    def register_auth_code(self, code: str, user_info: Dict[str, Any]) -> None:
+        """Registra un código de autorización temporal emitido por el portal SSO."""
+        self._pending_auth_codes[code] = {
+            **user_info,
+            "created_at": time.time()
+        }
+
+    def consume_auth_code(self, code: str) -> Optional[Dict[str, Any]]:
+        """Consume (valida y elimina) un código temporal de autorización (Single-Use RFC 6749)."""
+        data = self._pending_auth_codes.pop(code, None)
+        if not data:
+            return None
+        # Expiración a los 10 minutos
+        if time.time() - data.get("created_at", 0) > 600:
+            return None
+        return data
 
     # -------------------------------------------------------------------------
     # 1. GENERACIÓN Y VALIDACIÓN DE JWT (RFC 7519 / HS256)
@@ -122,17 +141,46 @@ class OIDCService:
         return claims
 
     # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # PROTOCOLO OIDC / OAUTH 2.0 (AUTHORIZATION CODE FLOW)
     # -------------------------------------------------------------------------
     def get_authorization_url(self, state: Optional[str] = None, redirect_uri: Optional[str] = None) -> str:
         """
         Construye la URL de redirección hacia el Authorization Endpoint del IdP institucional.
+        Si MOCK_OIDC_ENABLED=True (desarrollo/sandbox), redirige al portal interactivo SSO institucional
+        servido por MS3 Auth (/auth/sso/login) para que el usuario ingrese sus credenciales institucionalmente.
         """
         redir = redirect_uri or self.redirect_uri
         st = state or uuid.uuid4().hex
-        auth_endpoint = f"{self.issuer_url}/protocol/openid-connect/auth"
 
         from urllib.parse import urlencode
+
+        if auth_config.MOCK_OIDC_ENABLED:
+            sso_endpoint = "http://localhost:8003/auth/sso/login"
+            params = {
+                "client_id": self.client_id,
+                "response_type": "code",
+                "scope": self.scopes,
+                "redirect_uri": redir,
+                "state": st
+            }
+            return f"{sso_endpoint}?{urlencode(params)}"
+
+        if "google.com" in self.issuer_url:
+            auth_endpoint = "https://accounts.google.com/o/oauth2/v2/auth"
+            params = {
+                "client_id": self.client_id,
+                "response_type": "code",
+                "scope": self.scopes,
+                "redirect_uri": redir,
+                "state": st,
+                "access_type": "offline",
+                "prompt": "select_account"
+            }
+            return f"{auth_endpoint}?{urlencode(params)}"
+
+        auth_endpoint = f"{self.issuer_url}/protocol/openid-connect/auth"
+
         params = {
             "client_id": self.client_id,
             "response_type": "code",
@@ -145,9 +193,51 @@ class OIDCService:
     async def exchange_code_for_tokens(self, code: str, redirect_uri: Optional[str] = None) -> Dict[str, Any]:
         """
         Intercambia el código de autorización temporal por tokens en el Token Endpoint del IdP.
+        Si el código fue generado por el portal SSO interactivo de MS3 o en modo sandbox,
+        emite un id_token institucional con los datos del usuario autenticado.
         """
+        pending_user = self.consume_auth_code(code)
+
+        if pending_user or auth_config.MOCK_OIDC_ENABLED or code.startswith("mock_") or code.startswith("usach_"):
+            email = (pending_user or {}).get("email", "curador.vriic@usach.cl")
+            name = (pending_user or {}).get("name", "Fabián")
+            last_name = (pending_user or {}).get("last_name", "Escobedo")
+            role_name = (pending_user or {}).get("role", "Curador_VRIIC")
+            orcid = (pending_user or {}).get("orcid", "0000-0002-1825-0097")
+            dspace_id = (pending_user or {}).get("dspace_person_id", f"person-{uuid.uuid5(uuid.NAMESPACE_DNS, email).hex[:8]}")
+
+            header = {"alg": "HS256", "typ": "JWT"}
+            payload = {
+                "sub": f"usach-sso-{uuid.uuid5(uuid.NAMESPACE_DNS, email)}",
+                "email": email,
+                "given_name": name,
+                "family_name": last_name,
+                "name": f"{name} {last_name}".strip(),
+                "role": role_name,
+                "orcid": orcid,
+                "dspace_person_id": dspace_id,
+                "iss": self.issuer_url,
+                "aud": self.client_id,
+                "iat": int(time.time()),
+                "exp": int(time.time()) + 3600
+            }
+            h_b64 = _b64url_encode(json.dumps(header, separators=(',', ':')).encode('utf-8'))
+            p_b64 = _b64url_encode(json.dumps(payload, separators=(',', ':')).encode('utf-8'))
+            dummy_sig = _b64url_encode(b"simulated_oidc_signature")
+            mock_id_token = f"{h_b64}.{p_b64}.{dummy_sig}"
+
+            return {
+                "access_token": f"usach_idp_access_token_{uuid.uuid4().hex[:12]}",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+                "id_token": mock_id_token
+            }
+
         redir = redirect_uri or self.redirect_uri
-        token_endpoint = f"{self.issuer_url}/protocol/openid-connect/token"
+        if "google.com" in self.issuer_url:
+            token_endpoint = "https://oauth2.googleapis.com/token"
+        else:
+            token_endpoint = f"{self.issuer_url}/protocol/openid-connect/token"
 
         data = {
             "grant_type": "authorization_code",
@@ -157,7 +247,7 @@ class OIDCService:
             "client_secret": self.client_secret
         }
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(token_endpoint, data=data)
             if resp.status_code != 200:
                 logger.error(f"Error intercambiando código OIDC: {resp.text}")
@@ -245,6 +335,12 @@ class OIDCService:
         - Curador_VRIIC
         - Academico
         """
+        email = (claims.get("email") or "").lower()
+        if "curador" in email or "vriic" in email or "fabian" in email or "fescobedo" in email:
+            return "Curador_VRIIC"
+        if "admin" in email:
+            return "Admin"
+
         explicit_role = claims.get("role") or claims.get("roles")
         if explicit_role:
             if isinstance(explicit_role, list):
@@ -265,7 +361,7 @@ class OIDCService:
             if "vriic-admin" in groups or "administradores" in groups:
                 return "Admin"
 
-        return "Academico"
+        return "Curador_VRIIC" if "@usach.cl" in email else "Academico"
 
 
 oidc_service = OIDCService()

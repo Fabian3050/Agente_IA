@@ -28,6 +28,23 @@ class DetectItemRequest(BaseModel):
     force_reprocess: bool = Field(default=False, description="Forzar reproceso si estaba rechazada")
 
 
+class DetectMissingItemPayload(BaseModel):
+    item_id: Optional[str] = None
+    uuid_dspace: Optional[str] = None
+    title: Optional[str] = None
+    doi: Optional[str] = None
+    missing_fields: Optional[List[str]] = None
+    last_modified_dspace: Optional[datetime] = None
+
+    model_config = {"extra": "ignore"}
+
+
+class DetectMissingBatchRequest(BaseModel):
+    items: List[DetectMissingItemPayload] = Field(default_factory=list)
+
+    model_config = {"extra": "ignore"}
+
+
 class CurationDecisionRequest(BaseModel):
     user_id: uuid.UUID = Field(description="UUID del usuario curador")
     decision: str = Field(description="'Aprobar', 'Rechazar' o 'Editar'")
@@ -58,6 +75,54 @@ def detect_item(payload: DetectItemRequest, db: Session = Depends(get_db)):
         "message": msg,
         "item_id": str(item.id),
         "status": item.status.name if item.status else None
+    }
+
+
+@router.post("/detect-missing")
+async def detect_missing_batch(payload: DetectMissingBatchRequest, db: Session = Depends(get_db)):
+    """
+    Recibe un lote de registros con metadatos faltantes detectados y ejecuta
+    la detección e incorporación a la cola de enriquecimiento del agente IA.
+    """
+    results = []
+    for it in payload.items:
+        uid = it.uuid_dspace or it.item_id or ""
+        item, msg = orchestrator.handle_detection(
+            db=db,
+            uuid_dspace=uid,
+            doi=it.doi,
+            title=it.title,
+            last_modified_dspace=it.last_modified_dspace,
+            force_reprocess=True
+        )
+
+        if item:
+            try:
+                await orchestrator.run_pipeline_for_item(db, item)
+            except Exception as e_pipe:
+                pass
+
+        # Si el ítem corresponde a un ID numérico o UUID en dspace_enrichment_queue, ejecutar enriquecimiento
+        try:
+            from services.enrichment_service import EnrichmentService
+            service = EnrichmentService()
+            if uid.isdigit():
+                await service.enrich_item_by_id(int(uid), db, classify_with_ai=True)
+            elif uid:
+                await service.enrich_item_by_uuid(uid, db, classify_with_ai=True)
+        except Exception:
+            pass
+
+        results.append({
+            "item_id": str(item.id) if item else uid,
+            "status": item.status.name if item and item.status else "EN_PROCESO",
+            "message": msg
+        })
+
+    return {
+        "status": "success",
+        "processed": len(results),
+        "results": results
     }
 
 

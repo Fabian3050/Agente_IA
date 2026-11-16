@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 
 class AuthConfig(BaseSettings):
     # Parámetros OIDC / OAuth 2.0 Institucional (USACH SSO)
-    OIDC_ISSUER_URL: str = os.getenv("OIDC_ISSUER_URL", "https://sso.usach.cl/auth/realms/usach")
+    OIDC_ISSUER_URL: str = os.getenv("OIDC_ISSUER_URL", "https://sso.usach.cl")
     OIDC_CLIENT_ID: str = os.getenv("OIDC_CLIENT_ID", "agente-ia-dspace-cris")
     OIDC_CLIENT_SECRET: str = os.getenv("OIDC_CLIENT_SECRET", "usach-oidc-secret-token")
     OIDC_REDIRECT_URI: str = os.getenv("OIDC_REDIRECT_URI", "http://localhost:8003/auth/callback")
